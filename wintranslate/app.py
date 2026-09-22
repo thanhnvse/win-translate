@@ -36,6 +36,9 @@ APP_NAME = "win-translate"
 _MUTEX_NAME = "Global\\win-translate-single-instance"
 _ERROR_ALREADY_EXISTS = 183
 
+#: Letter drawn on the tray icon.
+_TRAY_LETTER = "W"
+
 
 class _Bridge(QObject):
     """Carries results from worker threads onto the Qt thread."""
@@ -203,9 +206,11 @@ def _tray_icon() -> QIcon:
     painter.drawRoundedRect(2, 2, 60, 60, 14, 14)
 
     painter.setPen(QColor("#ffffff"))
-    font = QFont("Segoe UI", 30, QFont.Bold)
+    # W is a wider glyph than most, so it gets a smaller point size to keep the
+    # same optical margin inside the rounded square.
+    font = QFont("Segoe UI", 26, QFont.Bold)
     painter.setFont(font)
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, "V")
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, _TRAY_LETTER)
     painter.end()
 
     return QIcon(pixmap)
