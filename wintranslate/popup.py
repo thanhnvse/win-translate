@@ -188,11 +188,12 @@ class TranslationPopup(QWidget):
         source_text: str,
         translated: str,
         detected_source: str | None,
+        target: str = "vi",
         show_detected: bool = True,
     ) -> None:
-        heading = "TIẾNG VIỆT"
+        heading = _language_label(target)
         if show_detected and detected_source:
-            heading = f"{detected_source.upper()} → TIẾNG VIỆT"
+            heading = f"{_language_label(detected_source)} → {heading}"
         self._heading.setText(heading)
         self._source.setText(_preview(source_text))
         self._set_translation(translated, state="ok")
@@ -291,6 +292,17 @@ class TranslationPopup(QWidget):
     def hideEvent(self, event) -> None:
         self._hint.setText(_HINT_TEXT)
         super().hideEvent(event)
+
+
+#: Only the two languages this app switches between get a name; anything else
+#: shows its ISO code, which is clearer than a wrong guess at the endonym.
+_LANGUAGE_LABELS = {"vi": "TIẾNG VIỆT", "en": "ENGLISH"}
+
+
+def _language_label(code: str) -> str:
+    if not code:
+        return "?"
+    return _LANGUAGE_LABELS.get(code.lower(), code.upper())
 
 
 def _preview(text: str, limit: int = 120) -> str:

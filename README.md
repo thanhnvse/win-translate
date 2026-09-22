@@ -1,7 +1,8 @@
 # win-translate
 
 A background tray app for Windows. Select text in any application, press a
-hotkey, and a small popup shows the Vietnamese translation next to the cursor.
+hotkey, and a small popup shows the translation next to the cursor: English in,
+Vietnamese out — and Vietnamese in, English out.
 
 ## Why a hotkey and not a right-click menu
 
@@ -45,6 +46,11 @@ A tray icon appears; the app does nothing else until the hotkey fires.
 Default hotkey is **Ctrl+Alt+T**. Select text anywhere, press it, and the popup
 appears by the pointer. `Esc`, the `✕`, or clicking elsewhere dismisses it.
 
+The direction is chosen from the text: select English (or anything else) and you
+get Vietnamese; select Vietnamese and you get English. One hotkey, both ways.
+
+Or just double-click `start.cmd`.
+
 ### Start with Windows
 
 Put a shortcut to `pythonw.exe -m wintranslate` in:
@@ -62,6 +68,7 @@ from the tray menu:
 | --- | --- | --- |
 | `hotkey` | `ctrl+alt+t` | e.g. `ctrl+shift+k`, `ctrl+alt+f2`. Needs at least one modifier. |
 | `target_language` | `vi` | Any Google Translate language code. |
+| `alternate_language` | `en` | Where a selection that is *already* Vietnamese goes. Set to `""` to disable the reverse direction. |
 | `google_api_key` | `""` | Empty uses the free endpoints. Set it to use Cloud Translation API v2. |
 | `popup_width` | `460` | Pixels. |
 | `popup_max_height` | `420` | The popup grows with the text up to this, then scrolls. |
@@ -85,6 +92,10 @@ browser.
   first, or the target app would receive Ctrl+Alt+C instead of a copy.
 * **Translation** — tried against several undocumented Google endpoints in
   order, because one host answering HTTP 429 says nothing about the next.
+* **Direction** — cannot be known before the text is seen, and a separate
+  detection call would cost a round-trip on every translation. Instead the app
+  asks for Vietnamese first and re-translates only when the reply says the input
+  was already Vietnamese, so only the reverse direction pays twice.
 
 ## Known limitations
 
@@ -108,7 +119,7 @@ browser.
 .venv\Scripts\python.exe -m pytest tests -q
 ```
 
-77 tests, no network and no display needed — Qt runs under the `offscreen`
+84 tests, no network and no display needed — Qt runs under the `offscreen`
 platform, and the translation tests use a fake HTTP session.
 
 Two checks need a real desktop session and are not part of the suite:

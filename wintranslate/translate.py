@@ -22,7 +22,7 @@ from __future__ import annotations
 import enum
 import logging
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 import requests
@@ -81,6 +81,9 @@ class Translation:
     #: Language Google detected on the input, e.g. ``"en"``. ``None`` when the
     #: response did not carry one.
     detected_source: str | None
+    #: Language the text was translated *into*. Set by the caller rather than the
+    #: parsers, which only see the response body.
+    target: str = ""
 
 
 @dataclass(frozen=True)
@@ -219,19 +222,21 @@ class Translator:
     def __init__(
         self,
         target_language: str = "vi",
+        alternate_language: str = "en",
         api_key: str | None = None,
         session: requests.Session | None = None,
         providers: tuple[FreeProvider, ...] = FREE_PROVIDERS,
     ) -> None:
         self.target_language = target_language
+        self.alternate_language = alternate_language
         self.api_key = api_key.strip() if api_key and api_key.strip() else None
         self.engine = Engine.OFFICIAL if self.api_key else Engine.FREE
         self.providers = providers
         self._session = session or requests.Session()
         self._session.headers["User-Agent"] = _BROWSER_USER_AGENT
 
-    def translate(self, text: str) -> Translation:
-        """Translate ``text`` into the configured target language.
+    def translate(self, text: str, target: str | None = None) -> Translation:
+        """Translate ``text`` into ``target`` (default: the configured language).
 
         Raises a :class:`TranslateError` subclass on every failure path so the
         caller can show the reason rather than a generic error.
@@ -242,19 +247,38 @@ class Translator:
         if len(stripped) > MAX_INPUT_CHARS:
             raise SelectionTooLongError(len(stripped))
 
+        target = target or self.target_language
         if self.engine is Engine.OFFICIAL:
-            return self._translate_official(stripped)
-        return self._translate_free(stripped)
+            result = self._translate_official(stripped, target)
+        else:
+            result = self._translate_free(stripped, target)
+        return replace(result, target=target)
 
-    def _translate_free(self, text: str) -> Translation:
+    def translate_auto(self, text: str) -> Translation:
+        """Translate, picking the direction from what the text turns out to be.
+
+        Selecting English gives Vietnamese; selecting Vietnamese gives English.
+        The direction cannot be decided up front without a separate detection
+        call, so this translates into the primary language first and only
+        re-translates when the answer comes back saying the input was already in
+        that language. Only the reverse direction pays for a second request.
+        """
+        result = self.translate(text)
+        if (
+            self.alternate_language
+            and result.detected_source
+            and result.detected_source.lower() == self.target_language.lower()
+        ):
+            return self.translate(text, target=self.alternate_language)
+        return result
+
+    def _translate_free(self, text: str, target: str) -> Translation:
         """Walk the provider chain, returning the first usable answer."""
         last_error: TranslateError | None = None
 
         for provider in self.providers:
             try:
-                payload = self._request(
-                    "GET", provider.build_url(text, self.target_language)
-                )
+                payload = self._request("GET", provider.build_url(text, target))
                 return provider.parse(payload)
             except TranslateError as exc:
                 log.debug("provider %s failed: %s", provider.name, exc)
@@ -262,12 +286,12 @@ class Translator:
 
         raise last_error or ServiceError("Không có endpoint dịch nào phản hồi.")
 
-    def _translate_official(self, text: str) -> Translation:
+    def _translate_official(self, text: str, target: str) -> Translation:
         payload = self._request(
             "POST",
             "https://translation.googleapis.com/language/translate/v2",
             params={"key": self.api_key},
-            json={"q": text, "target": self.target_language, "format": "text"},
+            json={"q": text, "target": target, "format": "text"},
         )
         return parse_official_response(payload)
 

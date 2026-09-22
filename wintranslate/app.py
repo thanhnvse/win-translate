@@ -41,7 +41,7 @@ class _Bridge(QObject):
     """Carries results from worker threads onto the Qt thread."""
 
     captured = Signal(int, str)
-    translated = Signal(int, str, str, object)
+    translated = Signal(int, str, str, object, str)
     failed = Signal(int, str)
 
 
@@ -51,6 +51,7 @@ class TranslateApp:
         self._config = config
         self._translator = Translator(
             target_language=config.target_language,
+            alternate_language=config.alternate_language,
             api_key=config.google_api_key,
         )
         self._popup = TranslationPopup(
@@ -146,7 +147,7 @@ class TranslateApp:
 
     def _translate(self, request_id: int, text: str) -> None:
         try:
-            result = self._translator.translate(text)
+            result = self._translator.translate_auto(text)
         except TranslateError as exc:
             self._bridge.failed.emit(request_id, str(exc))
             return
@@ -154,7 +155,7 @@ class TranslateApp:
             self._bridge.failed.emit(request_id, f"Lỗi không lường trước: {exc}")
             return
         self._bridge.translated.emit(
-            request_id, text, result.text, result.detected_source
+            request_id, text, result.text, result.detected_source, result.target
         )
 
     def _is_stale(self, request_id: int) -> bool:
@@ -167,7 +168,12 @@ class TranslateApp:
         self._popup.show_pending(text)
 
     def _on_translated(
-        self, request_id: int, source: str, translated: str, detected: object
+        self,
+        request_id: int,
+        source: str,
+        translated: str,
+        detected: object,
+        target: str,
     ) -> None:
         if self._is_stale(request_id):
             return
@@ -175,6 +181,7 @@ class TranslateApp:
             source,
             translated,
             detected if isinstance(detected, str) else None,
+            target=target,
             show_detected=self._config.show_detected_language,
         )
 

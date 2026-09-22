@@ -233,6 +233,68 @@ class TestProviderChain:
         assert all(kwargs["timeout"] == 10 for _, _, kwargs in session.calls)
 
 
+class TestBidirectional:
+    """The same hotkey has to work in both directions.
+
+    Direction cannot be known before the text is seen, so translate_auto asks
+    for Vietnamese first and only reverses when the answer says the input was
+    already Vietnamese.
+    """
+
+    def test_english_selection_gives_vietnamese_in_one_call(self):
+        session = _FakeSession(_FakeResponse([["Xin chào", "en"]]))
+        result = Translator(session=session).translate_auto("Hello")
+        assert result.text == "Xin chào"
+        assert result.target == "vi"
+        assert len(session.calls) == 1, "the forward direction must not pay twice"
+
+    def test_vietnamese_selection_gives_english(self):
+        session = _FakeSession(
+            _FakeResponse([["Xin chào", "vi"]]),   # asked for vi, input was vi
+            _FakeResponse([["Hello", "vi"]]),      # so ask again for en
+        )
+        result = Translator(session=session).translate_auto("Xin chào")
+        assert result.text == "Hello"
+        assert result.target == "en"
+        assert "tl=en" in session.calls[1][1]
+
+    def test_detection_is_case_insensitive(self):
+        session = _FakeSession(
+            _FakeResponse([["Xin chào", "VI"]]),
+            _FakeResponse([["Hello", "vi"]]),
+        )
+        assert Translator(session=session).translate_auto("Xin chào").target == "en"
+
+    def test_an_empty_alternate_language_disables_the_reverse_direction(self):
+        session = _FakeSession(_FakeResponse([["Xin chào", "vi"]]))
+        translator = Translator(alternate_language="", session=session)
+        result = translator.translate_auto("Xin chào")
+        assert result.target == "vi"
+        assert len(session.calls) == 1
+
+    def test_a_missing_detected_language_does_not_trigger_a_reverse(self):
+        session = _FakeSession(_FakeResponse([["Xin chào"]]))
+        assert Translator(session=session).translate_auto("Hello").target == "vi"
+        assert len(session.calls) == 1
+
+    def test_the_pair_is_configurable(self):
+        session = _FakeSession(
+            _FakeResponse([["こんにちは", "ja"]]),
+            _FakeResponse([["Hello", "ja"]]),
+        )
+        translator = Translator(
+            target_language="ja", alternate_language="en", session=session
+        )
+        result = translator.translate_auto("こんにちは")
+        assert result.target == "en"
+
+    def test_translate_still_honours_an_explicit_target(self):
+        session = _FakeSession(_FakeResponse([["Bonjour", "en"]]))
+        result = Translator(session=session).translate("Hello", target="fr")
+        assert result.target == "fr"
+        assert "tl=fr" in session.calls[0][1]
+
+
 class TestOfficialEngine:
     def test_sends_the_key_and_body(self):
         session = _FakeSession(

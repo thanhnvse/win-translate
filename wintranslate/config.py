@@ -17,6 +17,10 @@ DEFAULT_HOTKEY = "ctrl+alt+t"
 class Config:
     hotkey: str = DEFAULT_HOTKEY
     target_language: str = "vi"
+    #: Where text that is *already* in `target_language` gets translated to, so
+    #: the same hotkey works both ways. Set it to "" to always translate into
+    #: `target_language` and leave Vietnamese selections untouched.
+    alternate_language: str = "en"
     #: Empty means the free endpoint. Set this to use Cloud Translation API v2.
     google_api_key: str = ""
     popup_width: int = 460
