@@ -35,7 +35,7 @@ from wintranslate.selection import (  # noqa: E402
     capture_selection,
 )
 
-SENTINEL = "clipboard-noi-dung-cu-12345"
+SENTINEL = "previous-clipboard-contents-12345"
 FIXTURE_TEXT = "Hello world from win-translate"
 MULTILINE_TEXT = "First line\nSecond line\nThird line"
 

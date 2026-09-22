@@ -44,10 +44,10 @@ class Config:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise ConfigError(f"Không đọc được config tại {path}: {exc}") from exc
+            raise ConfigError(f"Could not read the config at {path}: {exc}") from exc
 
         if not isinstance(raw, dict):
-            raise ConfigError(f"Config tại {path} phải là một JSON object.")
+            raise ConfigError(f"The config at {path} must be a JSON object.")
 
         known = {field.name for field in fields(cls)}
         return cls(**{key: value for key, value in raw.items() if key in known})

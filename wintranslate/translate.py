@@ -50,13 +50,13 @@ class TranslateError(Exception):
 
 class EmptySelectionError(TranslateError):
     def __init__(self) -> None:
-        super().__init__("Không có text nào được bôi đen.")
+        super().__init__("Nothing was selected.")
 
 
 class SelectionTooLongError(TranslateError):
     def __init__(self, length: int) -> None:
         super().__init__(
-            f"Đoạn text dài {length:,} ký tự, vượt giới hạn {MAX_INPUT_CHARS:,}."
+            f"Selection is {length:,} characters; the limit is {MAX_INPUT_CHARS:,}."
         )
 
 
@@ -66,7 +66,7 @@ class ServiceError(TranslateError):
 
 class ResponseParseError(TranslateError):
     def __init__(self, detail: str = "") -> None:
-        message = "Không đọc được kết quả trả về từ Google Translate."
+        message = "Could not read the reply from Google Translate."
         super().__init__(f"{message} {detail}".strip())
 
 
@@ -144,7 +144,7 @@ def parse_single_response(payload: object) -> Translation:
 
     It answers with a nested array rather than an object::
 
-        [[["đã dịch", "source", ...], ["câu hai", "sentence two", ...]], null, "en", ...]
+        [[["Xin chào. ", "Hello. "], ["Tạm biệt.", "Goodbye."]], null, "en", ...]
 
     Google splits the input into sentence-sized chunks, so the translated text
     has to be stitched back together from element ``[0]`` of every chunk.
@@ -284,7 +284,7 @@ class Translator:
                 log.debug("provider %s failed: %s", provider.name, exc)
                 last_error = exc
 
-        raise last_error or ServiceError("Không có endpoint dịch nào phản hồi.")
+        raise last_error or ServiceError("No translation endpoint responded.")
 
     def _translate_official(self, text: str, target: str) -> Translation:
         payload = self._request(
@@ -302,18 +302,18 @@ class Translator:
             )
         except requests.Timeout as exc:
             raise ServiceError(
-                f"Google Translate không phản hồi trong {REQUEST_TIMEOUT_SECONDS}s."
+                f"Google Translate did not respond within {REQUEST_TIMEOUT_SECONDS}s."
             ) from exc
         except requests.RequestException as exc:
-            raise ServiceError(f"Không gọi được Google Translate: {exc}") from exc
+            raise ServiceError(f"Could not reach Google Translate: {exc}") from exc
 
         if response.status_code in (403, 429):
             raise ServiceError(
-                "Google đang chặn tạm thời do gọi quá nhiều "
+                "Google is rate-limiting this client "
                 f"(HTTP {response.status_code})."
             )
         if not response.ok:
-            raise ServiceError(f"Google Translate trả về HTTP {response.status_code}.")
+            raise ServiceError(f"Google Translate returned HTTP {response.status_code}.")
 
         try:
             return response.json()

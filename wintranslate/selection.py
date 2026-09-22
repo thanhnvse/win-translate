@@ -144,8 +144,8 @@ def _send(events: list[INPUT]) -> None:
     sent = user32.SendInput(len(events), array, ctypes.sizeof(INPUT))
     if sent != len(events):
         raise SelectionError(
-            "Windows chặn việc giả lập bàn phím. "
-            "Nếu app đang focus chạy quyền admin, win-translate cũng cần chạy admin."
+            "Windows blocked the synthesised keystroke. If the focused application "
+            "runs as administrator, win-translate has to as well."
         )
 
 
@@ -158,7 +158,7 @@ def _open_clipboard() -> None:
         if user32.OpenClipboard(None):
             return
         time.sleep(_CLIPBOARD_OPEN_DELAY)
-    raise SelectionError("Một ứng dụng khác đang giữ clipboard, không mở được.")
+    raise SelectionError("Another application is holding the clipboard open.")
 
 
 def _read_clipboard_text() -> str | None:
@@ -190,10 +190,10 @@ def _write_clipboard_text(text: str | None) -> None:
         size = (len(text) + 1) * ctypes.sizeof(ctypes.c_wchar)
         handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
         if not handle:
-            raise SelectionError("Không cấp phát được bộ nhớ để khôi phục clipboard.")
+            raise SelectionError("Could not allocate memory to restore the clipboard.")
         pointer = kernel32.GlobalLock(handle)
         if not pointer:
-            raise SelectionError("Không khoá được vùng nhớ clipboard.")
+            raise SelectionError("Could not lock the clipboard memory block.")
         try:
             ctypes.memmove(pointer, ctypes.create_unicode_buffer(text), size)
         finally:
@@ -201,7 +201,7 @@ def _write_clipboard_text(text: str | None) -> None:
         # Ownership of the handle passes to the clipboard on success, so it must
         # not be freed here.
         if not user32.SetClipboardData(CF_UNICODETEXT, handle):
-            raise SelectionError("Không ghi lại được clipboard.")
+            raise SelectionError("Could not write the clipboard back.")
     finally:
         user32.CloseClipboard()
 

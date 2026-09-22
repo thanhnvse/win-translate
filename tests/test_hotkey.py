@@ -41,15 +41,15 @@ class TestParseHotkey:
         assert parse_hotkey("ctrl+alt+pagedown")[1] == 0x22
 
     def test_rejects_a_bare_key_with_no_modifier(self):
-        with pytest.raises(HotkeyError, match="ít nhất một modifier"):
+        with pytest.raises(HotkeyError, match="at least one modifier"):
             parse_hotkey("t")
 
     def test_rejects_an_unknown_modifier(self):
-        with pytest.raises(HotkeyError, match="modifier"):
+        with pytest.raises(HotkeyError, match="Unknown modifier"):
             parse_hotkey("hyper+t")
 
     def test_rejects_an_unknown_key(self):
-        with pytest.raises(HotkeyError, match="phím"):
+        with pytest.raises(HotkeyError, match="Unknown key"):
             parse_hotkey("ctrl+alt+nonsense")
 
     def test_rejects_an_out_of_range_function_key(self):
@@ -57,5 +57,5 @@ class TestParseHotkey:
             parse_hotkey("ctrl+f25")
 
     def test_rejects_an_empty_spec(self):
-        with pytest.raises(HotkeyError, match="rỗng"):
+        with pytest.raises(HotkeyError, match="Empty hotkey"):
             parse_hotkey("   ")

@@ -29,14 +29,14 @@ def popup(qapp):
 
 
 def height_for(popup, text: str) -> int:
-    popup.show_result("nguon", text, "en")
+    popup.show_result("source", text, "en")
     return popup.height()
 
 
 class TestPopupSizing:
     def test_width_is_fixed(self, popup):
         for text in (SHORT, VERY_LONG):
-            popup.show_result("nguon", text, "en")
+            popup.show_result("source", text, "en")
             assert popup.width() == WIDTH
 
     def test_taller_text_makes_a_taller_popup(self, popup):
@@ -65,7 +65,7 @@ class TestPopupSizing:
         height_for(popup, VERY_LONG)
         popup.show_pending("Hello")
         assert popup.height() < MAX_HEIGHT
-        popup.show_error("Khong co text nao duoc boi den.")
+        popup.show_error("Nothing was selected.")
         assert popup.height() < MAX_HEIGHT
 
     def test_a_huge_source_selection_does_not_inflate_the_popup(self, popup):
@@ -75,29 +75,29 @@ class TestPopupSizing:
 
 class TestPopupContent:
     def test_shows_the_detected_language_in_the_heading(self, popup):
-        popup.show_result("Hello", "Xin chao", "en")
+        popup.show_result("Hello", "Xin chào", "en")
         assert "EN" in popup._heading.text()
 
     def test_detected_language_can_be_suppressed(self, popup):
-        popup.show_result("Hello", "Xin chao", "en", show_detected=False)
+        popup.show_result("Hello", "Xin chào", "en", show_detected=False)
         assert "EN" not in popup._heading.text()
 
     def test_missing_detected_language_still_renders(self, popup):
-        popup.show_result("Hello", "Xin chao", None)
+        popup.show_result("Hello", "Xin chào", None)
         assert popup._heading.text()
 
     def test_copy_is_disabled_until_there_is_a_result(self, popup):
         popup.show_pending("Hello")
         assert not popup._copy_button.isEnabled()
-        popup.show_result("Hello", "Xin chao", "en")
+        popup.show_result("Hello", "Xin chào", "en")
         assert popup._copy_button.isEnabled()
-        popup.show_error("hong")
+        popup.show_error("failed")
         assert not popup._copy_button.isEnabled()
 
     def test_copy_puts_the_translation_on_the_clipboard(self, popup, qapp):
-        popup.show_result("Hello", "Xin chao", "en")
+        popup.show_result("Hello", "Xin chào", "en")
         popup._copy_translation()
-        assert qapp.clipboard().text() == "Xin chao"
+        assert qapp.clipboard().text() == "Xin chào"
 
 
 class TestPopupAppearance:
@@ -129,7 +129,7 @@ class TestPopupAppearance:
         return statistics.median(values)
 
     def test_translation_sits_on_the_dark_card_not_a_white_block(self, popup):
-        popup.show_result("buffer", "dem", "en")
+        popup.show_result("buffer", "đệm", "en")
         # The card is #1e1f24 (lightness ~33). The regression this guards against
         # painted QPalette.Base white behind the text.
         assert self._background_lightness(popup) < 120
@@ -139,7 +139,7 @@ class TestPopupAppearance:
         assert self._background_lightness(popup) < 120
 
     def test_the_same_holds_for_the_error_state(self, popup):
-        popup.show_error("Khong co text nao duoc boi den.")
+        popup.show_error("Nothing was selected.")
         assert self._background_lightness(popup) < 120
 
     def test_scroll_viewport_does_not_fill_its_background(self, popup):
@@ -151,7 +151,7 @@ class TestClosing:
         from PySide6.QtCore import QEvent, Qt
         from PySide6.QtGui import QKeyEvent
 
-        popup.show_result("Hello", "Xin chao", "en")
+        popup.show_result("Hello", "Xin chào", "en")
         assert popup.isVisible()
         popup.keyPressEvent(
             QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
@@ -163,7 +163,7 @@ class TestClosing:
 
         close = popup.findChild(QPushButton, "close")
         assert close is not None, "the popup needs a visible way to dismiss it"
-        popup.show_result("Hello", "Xin chao", "en")
+        popup.show_result("Hello", "Xin chào", "en")
         assert popup.isVisible()
         close.click()
         assert not popup.isVisible()
@@ -172,7 +172,7 @@ class TestClosing:
         from PySide6.QtCore import QTimer
         from wintranslate.popup import _HINT_TEXT
 
-        popup.show_result("Hello", "Xin chao", "en")
+        popup.show_result("Hello", "Xin chào", "en")
         popup._copy_translation()
         assert popup._hint.text() != _HINT_TEXT
 
@@ -193,7 +193,7 @@ class TestPreview:
         assert len(result) == 121 and result.endswith("…")
 
     def test_leaves_short_text_alone(self):
-        assert _preview("ngan gon") == "ngan gon"
+        assert _preview("short") == "short"
 
 
 class TestPositioning:

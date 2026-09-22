@@ -72,7 +72,7 @@ from the tray menu:
 | `google_api_key` | `""` | Empty uses the free endpoints. Set it to use Cloud Translation API v2. |
 | `popup_width` | `460` | Pixels. |
 | `popup_max_height` | `420` | The popup grows with the text up to this, then scrolls. |
-| `show_detected_language` | `true` | Shows `EN → TIẾNG VIỆT` in the popup heading. |
+| `show_detected_language` | `true` | Shows `ENGLISH → VIETNAMESE` in the popup heading. |
 
 Restart the app after editing.
 

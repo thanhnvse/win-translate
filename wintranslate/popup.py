@@ -41,7 +41,7 @@ _MIN_TEXT_HEIGHT = 22
 _QWIDGETSIZE_MAX = 16777215
 
 #: Footer hint. Shown whenever the popup is not briefly confirming a copy.
-_HINT_TEXT = "Esc để đóng"
+_HINT_TEXT = "Esc to close"
 
 _STYLESHEET = """
 #card {
@@ -177,7 +177,7 @@ class TranslationPopup(QWidget):
         layout.addLayout(footer)
 
     def show_pending(self, source_text: str) -> None:
-        self._heading.setText("ĐANG DỊCH…")
+        self._heading.setText("TRANSLATING…")
         self._source.setText(_preview(source_text))
         self._set_translation("…", state="pending")
         self._copy_button.setEnabled(False)
@@ -201,7 +201,7 @@ class TranslationPopup(QWidget):
         self._present()
 
     def show_error(self, message: str) -> None:
-        self._heading.setText("KHÔNG DỊCH ĐƯỢC")
+        self._heading.setText("TRANSLATION FAILED")
         self._source.setText("")
         self._set_translation(message, state="error")
         self._copy_button.setEnabled(False)
@@ -274,7 +274,7 @@ class TranslationPopup(QWidget):
 
     def _copy_translation(self) -> None:
         QApplication.clipboard().setText(self._translation.text())
-        self._hint.setText("Đã copy")
+        self._hint.setText("Copied")
         # Put the keyboard hint back, otherwise the only reminder that Esc closes
         # the popup disappears for good after the first copy.
         QTimer.singleShot(1500, lambda: self._hint.setText(_HINT_TEXT))
@@ -296,7 +296,7 @@ class TranslationPopup(QWidget):
 
 #: Only the two languages this app switches between get a name; anything else
 #: shows its ISO code, which is clearer than a wrong guess at the endonym.
-_LANGUAGE_LABELS = {"vi": "TIẾNG VIỆT", "en": "ENGLISH"}
+_LANGUAGE_LABELS = {"vi": "VIETNAMESE", "en": "ENGLISH"}
 
 
 def _language_label(code: str) -> str:

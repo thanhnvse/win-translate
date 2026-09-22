@@ -79,7 +79,7 @@ class TranslateApp:
         self._tray.show()
         self._tray.showMessage(
             APP_NAME,
-            f"Đang chạy nền. Bôi đen text rồi bấm {self._config.hotkey}.",
+            f"Running in the background. Select text and press {self._config.hotkey}.",
             QSystemTrayIcon.Information,
             4000,
         )
@@ -95,16 +95,16 @@ class TranslateApp:
         tray.setToolTip(f"{APP_NAME} — {self._config.hotkey}")
 
         menu = QMenu()
-        translate_action = QAction(f"Dịch selection ({self._config.hotkey})", menu)
+        translate_action = QAction(f"Translate selection ({self._config.hotkey})", menu)
         translate_action.triggered.connect(self._on_hotkey)
         menu.addAction(translate_action)
 
-        config_action = QAction("Mở file config", menu)
+        config_action = QAction("Open config file", menu)
         config_action.triggered.connect(self._open_config)
         menu.addAction(config_action)
 
         menu.addSeparator()
-        quit_action = QAction("Thoát", menu)
+        quit_action = QAction("Quit", menu)
         quit_action.triggered.connect(self._app.quit)
         menu.addAction(quit_action)
 
@@ -134,7 +134,7 @@ class TranslateApp:
 
         if not text.strip():
             self._bridge.failed.emit(
-                request_id, "Không có text nào được bôi đen."
+                request_id, "Nothing was selected."
             )
             return
 
@@ -155,7 +155,7 @@ class TranslateApp:
             self._bridge.failed.emit(request_id, str(exc))
             return
         except Exception as exc:  # noqa: BLE001 - a crash here would kill the thread silently
-            self._bridge.failed.emit(request_id, f"Lỗi không lường trước: {exc}")
+            self._bridge.failed.emit(request_id, f"Unexpected error: {exc}")
             return
         self._bridge.translated.emit(
             request_id, text, result.text, result.detected_source, result.target
@@ -232,12 +232,12 @@ def main() -> int:
 
     if not _claim_single_instance():
         QMessageBox.information(
-            None, APP_NAME, f"{APP_NAME} đang chạy rồi — xem ở khay hệ thống."
+            None, APP_NAME, f"{APP_NAME} is already running — look in the system tray."
         )
         return 0
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, APP_NAME, "Không tìm thấy khay hệ thống.")
+        QMessageBox.critical(None, APP_NAME, "No system tray was found.")
         return 1
 
     try:

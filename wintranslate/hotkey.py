@@ -73,20 +73,20 @@ def parse_hotkey(spec: str) -> tuple[int, int]:
     """
     parts = [part.strip().lower() for part in spec.split("+") if part.strip()]
     if not parts:
-        raise HotkeyError(f"Hotkey rỗng: {spec!r}")
+        raise HotkeyError(f"Empty hotkey: {spec!r}")
 
     *modifier_names, key_name = parts
 
     modifiers = 0
     for name in modifier_names:
         if name not in _MODIFIER_NAMES:
-            raise HotkeyError(f"Không nhận ra modifier {name!r} trong {spec!r}.")
+            raise HotkeyError(f"Unknown modifier {name!r} in {spec!r}.")
         modifiers |= _MODIFIER_NAMES[name]
 
     if not modifiers:
         raise HotkeyError(
-            f"Hotkey {spec!r} cần ít nhất một modifier (ctrl/alt/shift/win), "
-            "nếu không nó sẽ nuốt phím đó của mọi ứng dụng."
+            f"Hotkey {spec!r} needs at least one modifier (ctrl/alt/shift/win), "
+            "otherwise it would swallow that key for every application."
         )
 
     virtual_key = _virtual_key(key_name, spec)
@@ -102,7 +102,7 @@ def _virtual_key(key_name: str, spec: str) -> int:
         number = int(key_name[1:])
         if 1 <= number <= 24:
             return 0x70 + number - 1
-    raise HotkeyError(f"Không nhận ra phím {key_name!r} trong {spec!r}.")
+    raise HotkeyError(f"Unknown key {key_name!r} in {spec!r}.")
 
 
 class HotkeyListener:
@@ -129,7 +129,7 @@ class HotkeyListener:
         if self._error is not None:
             raise self._error
         if not self._ready.is_set():
-            raise HotkeyError("Luồng hotkey không khởi động được.")
+            raise HotkeyError("The hotkey thread failed to start.")
 
     def stop(self) -> None:
         if self._thread_id is not None:
@@ -144,8 +144,8 @@ class HotkeyListener:
             None, self._HOTKEY_ID, self._modifiers, self._virtual_key
         ):
             self._error = HotkeyError(
-                f"Không đăng ký được hotkey {self.spec!r} — nhiều khả năng một "
-                "ứng dụng khác đã chiếm tổ hợp này. Đổi hotkey trong config."
+                f"Could not register hotkey {self.spec!r} — most likely another "
+                "application already owns this combination. Change it in the config."
             )
             self._ready.set()
             return
