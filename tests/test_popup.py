@@ -28,6 +28,22 @@ def popup(qapp):
     return TranslationPopup(width=WIDTH, max_height=MAX_HEIGHT)
 
 
+def _wrapping_text(popup) -> str:
+    """A sentence just wider than one line in the popup's own font.
+
+    A fixed string cannot do this: ONE_LINE wraps with Windows' fonts but fits on
+    one line with macOS's, which made it no taller than SHORT there.
+    """
+    from PySide6.QtGui import QFontMetrics
+
+    metrics = QFontMetrics(popup._translation.font())
+    words = ONE_LINE.split()
+    text = ""
+    while metrics.horizontalAdvance(text) <= popup._content_width * 1.3:
+        text = f"{text} {words[len(text.split()) % len(words)]}".strip()
+    return text
+
+
 def height_for(popup, text: str) -> int:
     popup.show_result("source", text, "en")
     return popup.height()
@@ -41,9 +57,9 @@ class TestPopupSizing:
 
     def test_taller_text_makes_a_taller_popup(self, popup):
         short = height_for(popup, SHORT)
-        one_line = height_for(popup, ONE_LINE)
+        two_lines = height_for(popup, _wrapping_text(popup))
         paragraph = height_for(popup, PARAGRAPH)
-        assert short < one_line < paragraph
+        assert short < two_lines < paragraph
 
     def test_height_is_capped(self, popup):
         assert height_for(popup, VERY_LONG) == MAX_HEIGHT
@@ -206,3 +222,31 @@ class TestPositioning:
         assert point.x() + WIDTH <= area.right() + 1
         assert area.top() <= point.y()
         assert point.y() + MAX_HEIGHT <= area.bottom() + 1
+
+
+class TestDismissal:
+    def test_hides_when_another_window_takes_activation(self, popup, qapp):
+        # The click-elsewhere case. focusOutEvent never reaches the popup itself
+        # because a child holds keyboard focus, so activation is what counts.
+        from PySide6.QtWidgets import QWidget
+
+        popup.show_result("source", "text", "en")
+        qapp.processEvents()
+        assert popup.isVisible()
+
+        other = QWidget()
+        other.show()
+        other.activateWindow()
+        qapp.processEvents()
+        try:
+            assert not popup.isVisible()
+        finally:
+            other.close()
+
+    def test_escape_hides(self, popup, qapp):
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+
+        popup.show_result("source", "text", "en")
+        qapp.sendEvent(popup, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+        assert not popup.isVisible()

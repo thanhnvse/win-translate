@@ -1,16 +1,20 @@
-"""User configuration, stored as JSON under ``%APPDATA%\\win-translate``."""
+"""User configuration, stored as JSON under ``%APPDATA%\\win-translate`` on
+Windows and ``~/Library/Application Support/win-translate`` on macOS."""
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-#: Ctrl+Alt+T is the default because it is almost unused on Windows. Ctrl+Shift+T
-#: would be a poor choice: a global hotkey outranks an application's own
-#: shortcut, so it would take "reopen closed tab" away from every browser.
-DEFAULT_HOTKEY = "ctrl+alt+t"
+#: A global hotkey outranks an application's own shortcut, so the default has to
+#: be a combination nobody misses. On Windows that rules out Ctrl+T (new tab in
+#: every browser) and Ctrl+Shift+T (reopen closed tab), hence Ctrl+Alt+T. On
+#: macOS those browser shortcuts use Command, so plain Control+T is free apart
+#: from "transpose letters" in text fields, and one modifier is quicker to hit.
+DEFAULT_HOTKEY = "ctrl+t" if sys.platform == "darwin" else "ctrl+alt+t"
 
 
 @dataclass
@@ -66,6 +70,8 @@ class ConfigError(Exception):
 
 
 def config_path() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "win-translate" / "config.json"
     base = os.environ.get("APPDATA")
     root = Path(base) if base else Path.home() / ".config"
     return root / "win-translate" / "config.json"

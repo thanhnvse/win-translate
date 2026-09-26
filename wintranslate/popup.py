@@ -7,7 +7,9 @@ The user asked for a translation, not for another window to manage.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+import sys
+
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -289,8 +291,28 @@ class TranslationPopup(QWidget):
         self.hide()
         super().focusOutEvent(event)
 
+    def changeEvent(self, event: QEvent) -> None:
+        # focusOutEvent alone misses a click into another app: keyboard focus
+        # sits on a child (the scroll area), so the popup itself never loses
+        # it. On macOS the window server also hides a tool window when the app
+        # deactivates without telling Qt, and the next popup would then reopen
+        # at the old spot instead of by the pointer.
+        # Not isActiveWindow(): under the macOS style a parentless tool window
+        # counts as active whenever it is shown (SH_Widget_ShareActivation).
+        if (
+            event.type() == QEvent.ActivationChange
+            and self.isVisible()
+            and QApplication.activeWindow() is not self
+        ):
+            self.hide()
+        super().changeEvent(event)
+
     def hideEvent(self, event) -> None:
         self._hint.setText(_HINT_TEXT)
+        if sys.platform == "darwin" and QGuiApplication.platformName() == "cocoa":
+            from .macos import yield_activation
+
+            yield_activation()
         super().hideEvent(event)
 
 

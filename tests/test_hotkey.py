@@ -1,6 +1,12 @@
+import sys
+
 import pytest
 
-from wintranslate.hotkey import (
+if sys.platform != "win32":
+    # The module binds user32 at import time.
+    pytest.skip("Win32 hotkey module", allow_module_level=True)
+
+from wintranslate.hotkey import (  # noqa: E402
     MOD_ALT,
     MOD_CONTROL,
     MOD_NOREPEAT,

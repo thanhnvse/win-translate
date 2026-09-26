@@ -58,3 +58,15 @@ class TestConfigLoad:
         path = tmp_path / "config.json"
         Config(target_language="vi").save(path)
         assert "\\u" not in path.read_text(encoding="utf-8")
+
+
+class TestDefaultHotkey:
+    def test_default_is_a_parseable_hotkey_on_this_platform(self):
+        import sys
+
+        if sys.platform == "darwin":
+            from wintranslate.hotkey_macos import parse_hotkey
+        else:
+            from wintranslate.hotkey import parse_hotkey
+        parse_hotkey(DEFAULT_HOTKEY)  # raises on anything invalid
+
