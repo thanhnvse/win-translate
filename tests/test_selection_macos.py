@@ -20,16 +20,22 @@ class FakePasteboard:
     ``reads_before_data`` further reads, like ``clearContents`` followed by a
     slow ``writeObjects:``."""
 
-    def __init__(self, previous, text=None, reads_before_data=0):
+    def __init__(self, previous, text=None, reads_before_data=0, ignored_copies=0):
         self._text = previous
         self._pending = text
         self._reads_left = reads_before_data
+        self._ignored_left = ignored_copies
         self._count = 1
+        self.copies = 0
         self.writes = []
 
     def copy(self):
+        self.copies += 1
         if self._pending is None:
             return  # the app ignored Cmd+C
+        if self._ignored_left:
+            self._ignored_left -= 1
+            return  # this one arrived while the app was not listening
         self._count += 1
         self._text = None
 
@@ -64,6 +70,7 @@ def board(monkeypatch):
         )
         monkeypatch.setattr(selection_macos, "_post_copy", fake.copy)
         monkeypatch.setattr(selection_macos, "_COPY_POLL_INTERVAL", 0.001)
+        monkeypatch.setattr(selection_macos, "_COPY_RETRY_SECONDS", 0.02)
         return fake
 
     return install
@@ -98,3 +105,22 @@ class TestCaptureSelection:
         monkeypatch.setattr(selection_macos, "AXIsProcessTrusted", lambda: False)
         with pytest.raises(selection_macos.SelectionError, match="Accessibility"):
             selection_macos.capture_selection()
+
+    def test_sends_cmd_c_again_when_the_first_is_not_answered(self, board):
+        fake = board(FakePasteboard(previous="old", text="selected", ignored_copies=1))
+        assert selection_macos.capture_selection() == "selected"
+        assert fake.copies == 2
+        assert fake.writes == ["old"]
+
+    def test_gives_up_after_the_last_attempt(self, board, monkeypatch):
+        monkeypatch.setattr(selection_macos, "_COPY_TIMEOUT_SECONDS", 0.2)
+        fake = board(FakePasteboard(previous="old", text=None))
+        assert selection_macos.capture_selection() == ""
+        assert fake.copies == selection_macos._COPY_ATTEMPTS
+
+    def test_logs_an_unanswered_copy(self, board, monkeypatch, caplog):
+        monkeypatch.setattr(selection_macos, "_COPY_TIMEOUT_SECONDS", 0.05)
+        board(FakePasteboard(previous="old", text=None))
+        with caplog.at_level("WARNING"):
+            assert selection_macos.capture_selection() == ""
+        assert "no answer" in caplog.text and "attempts=" in caplog.text

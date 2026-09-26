@@ -298,6 +298,8 @@ def main() -> int:
     logging.basicConfig(
         level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    # One line per translation from our own code; libraries stay at WARNING.
+    logging.getLogger("wintranslate").setLevel(logging.INFO)
     app = QApplication([])
     app.setApplicationName(APP_NAME)
     # The popup is an ordinary window as far as Qt is concerned; without this the

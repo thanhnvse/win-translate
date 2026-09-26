@@ -23,19 +23,23 @@ Two macOS-specific details:
   So the text is polled for too, not read once. Windows gets this for free:
   ``OpenClipboard`` fails until the writer has closed it.
 * **The hotkey's modifiers are still held.** The Cmd+C events come from a
-  *private* event source and carry explicit flags, so the Control and Option
-  the user is still pressing are not merged into them. That is the macOS
-  counterpart of releasing every held modifier first on Windows.
+  *private* event source and carry explicit flags, which is enough for a
+  physical keyboard.
+* **The first copy can go unanswered.** With a mouse button that Logi Options+
+  maps to the hotkey, Chrome ignored the first Cmd+C and answered the second,
+  sent 250 ms later — with no key or mouse button held at the time. So Cmd+C is
+  sent again while nothing has answered, and each capture logs how many it took.
 
 Known limitation: only text is preserved across the round-trip, as on Windows.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 
 import Quartz
-from AppKit import NSPasteboard, NSPasteboardTypeString
+from AppKit import NSPasteboard, NSPasteboardTypeString, NSWorkspace
 from ApplicationServices import (
     AXIsProcessTrusted,
     AXIsProcessTrustedWithOptions,
@@ -46,8 +50,14 @@ from ApplicationServices import (
 #: layout macOS ships.
 _KEY_C = 0x08
 
-#: How long to wait for the frontmost app to answer Cmd+C.
-_COPY_TIMEOUT_SECONDS = 0.6
+log = logging.getLogger(__name__)
+
+#: How long to wait for the frontmost app to answer Cmd+C, all attempts together.
+_COPY_TIMEOUT_SECONDS = 0.9
+#: Cmd+C is sent up to this many times, this far apart, until something answers.
+_COPY_ATTEMPTS = 3
+_COPY_RETRY_SECONDS = 0.25
+
 _COPY_POLL_INTERVAL = 0.015
 
 ACCESSIBILITY_SETTINGS_URL = (
@@ -74,6 +84,11 @@ def request_accessibility() -> bool:
     macOS stays silent and the setting has to be changed by hand.
     """
     return bool(AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True}))
+
+
+def _frontmost_app() -> str:
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    return str(app.bundleIdentifier()) if app is not None else "?"
 
 
 def _post_copy() -> None:
@@ -106,18 +121,29 @@ def capture_selection() -> str:
     previous_text = board.stringForType_(NSPasteboardTypeString)
     count_before = board.changeCount()
 
-    _post_copy()
+    frontmost = _frontmost_app()
 
+    # Copying twice is harmless; a copy the app did not take is not.
     deadline = time.monotonic() + _COPY_TIMEOUT_SECONDS
+    attempts = 0
     changed = False
-    while time.monotonic() < deadline:
-        if board.changeCount() != count_before:
-            changed = True
-            break
-        time.sleep(_COPY_POLL_INTERVAL)
+    while not changed and time.monotonic() < deadline:
+        if attempts < _COPY_ATTEMPTS:
+            _post_copy()
+            attempts += 1
+        retry_at = min(deadline, time.monotonic() + _COPY_RETRY_SECONDS)
+        while time.monotonic() < retry_at:
+            if board.changeCount() != count_before:
+                changed = True
+                break
+            time.sleep(_COPY_POLL_INTERVAL)
 
     if not changed:
+        # "Nothing was selected" is also what the user sees when every copy was
+        # ignored; this line tells the two apart.
+        log.warning("Cmd+C got no answer: app=%s attempts=%d", frontmost, attempts)
         return ""
+    log.info("Cmd+C answered: app=%s attempts=%d", frontmost, attempts)
 
     selected = board.stringForType_(NSPasteboardTypeString)
     while selected is None and time.monotonic() < deadline:
