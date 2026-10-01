@@ -143,7 +143,7 @@ def is_running(app: Path) -> bool:
     executable = str(app / "Contents" / "MacOS" / APP_NAME)
     try:
         listing = subprocess.run(
-            ["ps", "-axo", "command="], capture_output=True, text=True, check=True
+            ["ps", "-axww", "-o", "command="], capture_output=True, text=True, check=True
         ).stdout
     except (OSError, subprocess.SubprocessError) as exc:
         # Refuse rather than guess. Returning False here would let install()
