@@ -11,7 +11,7 @@ import sys
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    sys.platform == "darwin", reason="exercises the Windows hotkey wiring"
+    sys.platform != "win32", reason="exercises the Windows hotkey wiring"
 )
 
 

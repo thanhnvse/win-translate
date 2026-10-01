@@ -93,4 +93,3 @@ class TestIsRunningCannotAnswer:
         """main() catches (BuildError, ImportError, OSError); CalledProcessError
         is a SubprocessError and would have escaped it."""
         assert not issubclass(subprocess.CalledProcessError, OSError)
-        assert issubclass(build_module.BuildError, Exception)

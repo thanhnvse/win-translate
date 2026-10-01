@@ -335,7 +335,6 @@ def _configure_logging() -> None:
 
 
 def main() -> int:
-    _configure_logging()
     app = QApplication([])
     app.setApplicationName(APP_NAME)
     # The popup is an ordinary window as far as Qt is concerned; without this the
@@ -350,6 +349,10 @@ def main() -> int:
             + ("menu bar." if IS_MACOS else "system tray.")
         )
         return 0
+
+    # After the instance check: a second copy must not open the same rotating
+    # log, or the first copy's rollover fails on Windows.
+    _configure_logging()
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(None, APP_NAME, "No system tray was found.")
