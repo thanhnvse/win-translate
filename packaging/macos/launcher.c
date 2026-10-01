@@ -27,13 +27,19 @@
 extern char **environ;
 
 static volatile pid_t child = 0;
+/* A signal that arrived before the child existed; main() passes it on. */
+static volatile sig_atomic_t pending = 0;
 
 /* Quit from Activity Monitor, logout and shutdown all signal this process;
  * pass it on so the app underneath gets to shut down too. */
 static void forward(int sig) {
+    int saved_errno = errno; /* main() tests errno after waitpid() */
     if (child > 0) {
         kill(child, sig);
+    } else {
+        pending = sig;
     }
+    errno = saved_errno;
 }
 
 /* Launched from Finder, stdout and stderr go nowhere. Send them to the same
@@ -81,11 +87,15 @@ int main(void) {
         return 1;
     }
     child = pid;
+    if (pending) {
+        kill(pid, pending);
+    }
 
     int status;
     while (waitpid(pid, &status, 0) < 0) {
         if (errno != EINTR) {
             fprintf(stderr, "win-translate: waitpid: %s\n", strerror(errno));
+            kill(pid, SIGTERM); /* do not leave the app running without us */
             return 1;
         }
     }

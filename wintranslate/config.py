@@ -54,7 +54,17 @@ class Config:
             raise ConfigError(f"The config at {path} must be a JSON object.")
 
         known = {field.name for field in fields(cls)}
-        return cls(**{key: value for key, value in raw.items() if key in known})
+        values = {key: value for key, value in raw.items() if key in known}
+        # A wrong type would otherwise surface far from here, as a traceback.
+        defaults = cls()
+        for key, value in values.items():
+            expected = type(getattr(defaults, key))
+            if type(value) is not expected:  # not isinstance: True must not pass as an int
+                raise ConfigError(
+                    f"{key!r} in {path} must be a {expected.__name__}, "
+                    f"not {type(value).__name__}."
+                )
+        return cls(**values)
 
     def save(self, path: Path | None = None) -> None:
         path = path or config_path()

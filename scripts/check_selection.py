@@ -166,5 +166,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.serve_window is not None:
+        if args.ready_file is None:
+            parser.error("--serve-window needs --ready-file")
         sys.exit(serve_window(args.serve_window, Path(args.ready_file)))
-    sys.exit(main())
+    # The checks overwrite the clipboard; hand the user back what they had.
+    saved = _read_clipboard_text()
+    try:
+        sys.exit(main())
+    finally:
+        _write_clipboard_text(saved)

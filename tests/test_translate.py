@@ -173,6 +173,13 @@ class TestInputGuards:
             Translator(session=session).translate("x" * (MAX_INPUT_CHARS + 1))
         assert session.calls == []
 
+    def test_rejects_text_whose_url_would_be_too_long(self):
+        # Under MAX_INPUT_CHARS, but "ệ" percent-encodes to 9 characters.
+        session = _FakeSession()
+        with pytest.raises(SelectionTooLongError):
+            Translator(session=session).translate("ệ" * 3000)
+        assert session.calls == []
+
 
 class TestProviderChain:
     def test_uses_the_first_provider_when_it_answers(self):
@@ -305,7 +312,9 @@ class TestOfficialEngine:
         method, url, kwargs = session.calls[0]
         assert method == "POST"
         assert url.endswith("/language/translate/v2")
-        assert kwargs["params"] == {"key": "secret"}
+        # In a header: error messages quote the URL, and those reach the popup.
+        assert kwargs["headers"] == {"X-goog-api-key": "secret"}
+        assert "secret" not in url and "params" not in kwargs
         assert kwargs["json"]["target"] == "vi"
 
     def test_does_not_fall_back_to_the_free_endpoints(self):

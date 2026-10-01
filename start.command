@@ -11,4 +11,10 @@ fi
 # The log sits outside the repo, where iCloud would otherwise sync it.
 LOG="$HOME/Library/Logs/win-translate.log"
 nohup .venv.nosync/bin/python -m wintranslate >>"$LOG" 2>&1 &
+# A missing dependency kills it within a second; say so instead of "started".
+sleep 1
+if ! kill -0 $! 2>/dev/null; then
+    echo "win-translate failed to start. See $LOG" >&2
+    exit 1
+fi
 echo "win-translate started. Log: $LOG"

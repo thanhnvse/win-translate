@@ -138,8 +138,16 @@ def build_bundle(app: Path, workdir: Path) -> None:
 
 
 def is_running(app: Path) -> bool:
+    # Exact match on the command, not `pgrep -f`: that takes the path as a regex
+    # and also matches any process that merely mentions it (an editor, `tail`).
     executable = str(app / "Contents" / "MacOS" / APP_NAME)
-    return subprocess.run(["pgrep", "-f", executable], capture_output=True).returncode == 0
+    commands = subprocess.run(
+        ["ps", "-axo", "command="], capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    return any(
+        line.strip() == executable or line.startswith(executable + " ")
+        for line in commands
+    )
 
 
 def install(built: Path, target: Path) -> None:
@@ -180,7 +188,10 @@ def main() -> int:
             built = Path(tmp) / f"{APP_NAME}.app"
             build_bundle(built, Path(tmp))
             install(built, target)
-    except BuildError as exc:
+    # ImportError: build_icon/info_plist import PySide6 and wintranslate into
+    # whatever interpreter runs this, which may not be the venv.
+    # OSError: permissions on --dest, or a symlink where the bundle should be.
+    except (BuildError, ImportError, OSError) as exc:
         print(f"Build failed: {exc}", file=sys.stderr)
         return 1
 

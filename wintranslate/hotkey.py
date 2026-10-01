@@ -14,9 +14,12 @@ Qt event loop is busy.
 from __future__ import annotations
 
 import ctypes
+import logging
 import threading
 from ctypes import wintypes
 from typing import Callable
+
+log = logging.getLogger(__name__)
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -39,6 +42,10 @@ _MODIFIER_NAMES = {
     "win": MOD_WIN,
     "super": MOD_WIN,
     "cmd": MOD_WIN,
+    # macOS names, so a config written on a Mac still loads here.
+    "option": MOD_ALT,
+    "opt": MOD_ALT,
+    "command": MOD_WIN,
 }
 
 _NAMED_KEYS = {
@@ -161,6 +168,11 @@ class HotkeyListener:
                     message.message == WM_HOTKEY
                     and message.wParam == self._HOTKEY_ID
                 ):
-                    self._callback()
+                    # Escaping here would end the loop and unregister the hotkey
+                    # for the rest of the session, silently.
+                    try:
+                        self._callback()
+                    except Exception:
+                        log.exception("hotkey callback failed")
         finally:
             user32.UnregisterHotKey(None, self._HOTKEY_ID)

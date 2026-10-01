@@ -43,6 +43,15 @@ class TestConfigLoad:
         # An API key pasted in by hand must survive a syntax error elsewhere.
         assert path.read_text(encoding="utf-8") == '{"hotkey": '
 
+    @pytest.mark.parametrize(
+        "raw", [{"popup_width": "460"}, {"hotkey": None}, {"popup_width": True}]
+    )
+    def test_a_value_of_the_wrong_type_is_reported(self, tmp_path, raw):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(ConfigError):
+            Config.load(path)
+
     def test_a_json_array_is_rejected(self, tmp_path):
         path = tmp_path / "config.json"
         path.write_text("[]", encoding="utf-8")
@@ -56,8 +65,9 @@ class TestConfigLoad:
 
     def test_saved_file_keeps_vietnamese_readable(self, tmp_path):
         path = tmp_path / "config.json"
-        Config(target_language="vi").save(path)
-        assert "\\u" not in path.read_text(encoding="utf-8")
+        Config(alternate_language="tiếng Việt").save(path)
+        text = path.read_text(encoding="utf-8")
+        assert "tiếng Việt" in text and "\\u" not in text
 
 
 class TestDefaultHotkey:

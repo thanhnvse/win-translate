@@ -36,6 +36,11 @@ REQUEST_TIMEOUT_SECONDS = 10
 # Google rejects very long `q` parameters on the free endpoints, and a selection
 # that large is a mis-click rather than something anyone wants translated.
 MAX_INPUT_CHARS = 5000
+# The free endpoints take the text in a GET URL, where each Vietnamese character
+# percent-encodes to 6-9 characters, so a selection well under MAX_INPUT_CHARS
+# can still be too long for Google to accept.
+# ponytail: fixed cap; switch the free providers to POST if real users hit it.
+MAX_ENCODED_CHARS = 16_000
 
 # The free endpoints answer 403 to clients that look automated.
 _BROWSER_USER_AGENT = (
@@ -56,7 +61,8 @@ class EmptySelectionError(TranslateError):
 class SelectionTooLongError(TranslateError):
     def __init__(self, length: int) -> None:
         super().__init__(
-            f"Selection is {length:,} characters; the limit is {MAX_INPUT_CHARS:,}."
+            f"Selection is {length:,} characters; the limit is {MAX_INPUT_CHARS:,} "
+            "(less for accented or non-Latin text)."
         )
 
 
@@ -244,11 +250,14 @@ class Translator:
         stripped = text.strip()
         if not stripped:
             raise EmptySelectionError()
-        if len(stripped) > MAX_INPUT_CHARS:
+        is_official = self.engine is Engine.OFFICIAL
+        if len(stripped) > MAX_INPUT_CHARS or (
+            not is_official and len(urllib.parse.quote(stripped)) > MAX_ENCODED_CHARS
+        ):
             raise SelectionTooLongError(len(stripped))
 
         target = target or self.target_language
-        if self.engine is Engine.OFFICIAL:
+        if is_official:
             result = self._translate_official(stripped, target)
         else:
             result = self._translate_free(stripped, target)
@@ -290,7 +299,9 @@ class Translator:
         payload = self._request(
             "POST",
             "https://translation.googleapis.com/language/translate/v2",
-            params={"key": self.api_key},
+            # A header, not ?key=: requests puts the URL in its error messages,
+            # and those end up on screen in the popup.
+            headers={"X-goog-api-key": self.api_key},
             json={"q": text, "target": target, "format": "text"},
         )
         return parse_official_response(payload)
