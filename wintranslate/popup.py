@@ -146,11 +146,15 @@ class TranslationPopup(QWidget):
         heading_row.addWidget(close_button)
         layout.addLayout(heading_row)
 
-        self._source = QLabel(objectName="source", wordWrap=True)
+        # PlainText, not the default AutoText: a selection such as "<b>x</b>"
+        # must be shown as written, not rendered as markup.
+        self._source = QLabel(objectName="source", wordWrap=True, textFormat=Qt.PlainText)
         self._source.setFixedWidth(self._content_width)
         layout.addWidget(self._source)
 
-        self._translation = QLabel(objectName="translation", wordWrap=True)
+        self._translation = QLabel(
+            objectName="translation", wordWrap=True, textFormat=Qt.PlainText
+        )
         self._translation.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._translation.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._translation.setFixedWidth(self._content_width)

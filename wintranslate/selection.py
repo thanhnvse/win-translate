@@ -122,6 +122,7 @@ kernel32.GlobalLock.restype = wintypes.LPVOID
 kernel32.GlobalUnlock.argtypes = (wintypes.HGLOBAL,)
 kernel32.GlobalAlloc.argtypes = (wintypes.UINT, ctypes.c_size_t)
 kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+kernel32.GlobalFree.argtypes = (wintypes.HGLOBAL,)
 
 
 def _key_event(vk: int, key_up: bool) -> INPUT:
@@ -201,6 +202,7 @@ def _write_clipboard_text(text: str | None) -> None:
         # Ownership of the handle passes to the clipboard on success, so it must
         # not be freed here.
         if not user32.SetClipboardData(CF_UNICODETEXT, handle):
+            kernel32.GlobalFree(handle)  # still ours: the clipboard did not take it
             raise SelectionError("Could not write the clipboard back.")
     finally:
         user32.CloseClipboard()

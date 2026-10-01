@@ -16,6 +16,14 @@ from pathlib import Path
 #: from "transpose letters" in text fields, and one modifier is quicker to hit.
 DEFAULT_HOTKEY = "ctrl+t" if sys.platform == "darwin" else "ctrl+alt+t"
 
+#: Settings where ``null`` is a reasonable thing to hand-write for "none", and
+#: is read as the empty value rather than rejected. Both of these already treat
+#: empty as "off" -- no API key, no reverse direction -- so refusing to start
+#: over a ``null`` would block a config that behaves exactly as intended.
+#: Every other setting stays strict: ``null`` for a hotkey or a popup width has
+#: no meaning, and failing early beats a traceback later.
+_NULL_MEANS_EMPTY = frozenset({"alternate_language", "google_api_key"})
+
 
 @dataclass
 class Config:
@@ -54,7 +62,20 @@ class Config:
             raise ConfigError(f"The config at {path} must be a JSON object.")
 
         known = {field.name for field in fields(cls)}
-        return cls(**{key: value for key, value in raw.items() if key in known})
+        values = {key: value for key, value in raw.items() if key in known}
+        # A wrong type would otherwise surface far from here, as a traceback.
+        defaults = cls()
+        for key, value in list(values.items()):
+            if value is None and key in _NULL_MEANS_EMPTY:
+                values[key] = ""
+                continue
+            expected = type(getattr(defaults, key))
+            if type(value) is not expected:  # not isinstance: True must not pass as an int
+                raise ConfigError(
+                    f"{key!r} in {path} must be a {expected.__name__}, "
+                    f"not {type(value).__name__}."
+                )
+        return cls(**values)
 
     def save(self, path: Path | None = None) -> None:
         path = path or config_path()

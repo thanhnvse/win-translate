@@ -135,7 +135,11 @@ def main() -> int:
         # Only when a check actually wrote to it; None empties the board rather
         # than leaving the sentinel behind.
         if board.changeCount() != count_before:
-            _write_pasteboard_text(board, saved)
+            try:
+                _write_pasteboard_text(board, saved)
+            except Exception as exc:  # noqa: BLE001
+                # Raising from here would discard run_checks()' return value.
+                print(f"Could not restore the clipboard: {exc}", file=sys.stderr)
 
 
 def run_checks() -> int:
@@ -213,5 +217,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.serve_window is not None:
+        if args.ready_file is None:
+            parser.error("--serve-window needs --ready-file")
         sys.exit(serve_window(args.serve_window, Path(args.ready_file)))
     sys.exit(main())

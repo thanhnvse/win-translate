@@ -102,6 +102,14 @@ class TestPopupContent:
         popup.show_result("Hello", "Xin chào", None)
         assert popup._heading.text()
 
+    def test_markup_in_the_selection_is_shown_literally(self, popup):
+        from PySide6.QtCore import Qt
+
+        popup.show_result("<b>Hello</b>", "<i>Xin chào</i>", "en")
+        assert popup._source.textFormat() == Qt.PlainText
+        assert popup._translation.textFormat() == Qt.PlainText
+        assert popup._translation.text() == "<i>Xin chào</i>"
+
     def test_copy_is_disabled_until_there_is_a_result(self, popup):
         popup.show_pending("Hello")
         assert not popup._copy_button.isEnabled()

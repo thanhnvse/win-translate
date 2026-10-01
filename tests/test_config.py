@@ -43,6 +43,46 @@ class TestConfigLoad:
         # An API key pasted in by hand must survive a syntax error elsewhere.
         assert path.read_text(encoding="utf-8") == '{"hotkey": '
 
+    @pytest.mark.parametrize(
+        "raw", [{"popup_width": "460"}, {"hotkey": None}, {"popup_width": True}]
+    )
+    def test_a_value_of_the_wrong_type_is_reported(self, tmp_path, raw):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(ConfigError):
+            Config.load(path)
+
+    @pytest.mark.parametrize("key", ["google_api_key", "alternate_language"])
+    def test_null_is_read_as_empty_for_the_settings_that_can_be_off(
+        self, tmp_path, key
+    ):
+        """`null` is how someone hand-writes "none", and for these two it works.
+
+        Both are already treated as "off" when empty -- no API key, no reverse
+        direction -- so a config saying `null` describes a working setup.
+        Rejecting it would refuse to start over nothing.
+        """
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({key: None}), encoding="utf-8")
+        assert getattr(Config.load(path), key) == ""
+
+    def test_a_null_api_key_leaves_the_translator_on_the_free_engine(self, tmp_path):
+        from wintranslate.translate import Engine, Translator
+
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"google_api_key": None}), encoding="utf-8")
+        config = Config.load(path)
+        assert Translator(api_key=config.google_api_key).engine is Engine.FREE
+
+    @pytest.mark.parametrize(
+        "key", ["hotkey", "target_language", "popup_width", "show_detected_language"]
+    )
+    def test_null_is_still_rejected_everywhere_else(self, tmp_path, key):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({key: None}), encoding="utf-8")
+        with pytest.raises(ConfigError):
+            Config.load(path)
+
     def test_a_json_array_is_rejected(self, tmp_path):
         path = tmp_path / "config.json"
         path.write_text("[]", encoding="utf-8")
@@ -56,8 +96,9 @@ class TestConfigLoad:
 
     def test_saved_file_keeps_vietnamese_readable(self, tmp_path):
         path = tmp_path / "config.json"
-        Config(target_language="vi").save(path)
-        assert "\\u" not in path.read_text(encoding="utf-8")
+        Config(alternate_language="tiếng Việt").save(path)
+        text = path.read_text(encoding="utf-8")
+        assert "tiếng Việt" in text and "\\u" not in text
 
 
 class TestDefaultHotkey:

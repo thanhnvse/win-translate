@@ -138,8 +138,23 @@ def build_bundle(app: Path, workdir: Path) -> None:
 
 
 def is_running(app: Path) -> bool:
+    # Exact match on the command, not `pgrep -f`: that takes the path as a regex
+    # and also matches any process that merely mentions it (an editor, `tail`).
     executable = str(app / "Contents" / "MacOS" / APP_NAME)
-    return subprocess.run(["pgrep", "-f", executable], capture_output=True).returncode == 0
+    try:
+        listing = subprocess.run(
+            ["ps", "-axww", "-o", "command="], capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Refuse rather than guess. Returning False here would let install()
+        # rmtree a bundle that is still running. CalledProcessError is a
+        # SubprocessError, not an OSError, so main()'s handler misses it.
+        raise BuildError(f"Could not check whether {APP_NAME} is running: {exc}") from exc
+    # strip() before matching too: a command padded by ps must still match.
+    return any(
+        line.strip() == executable or line.strip().startswith(executable + " ")
+        for line in listing.splitlines()
+    )
 
 
 def install(built: Path, target: Path) -> None:
@@ -180,7 +195,10 @@ def main() -> int:
             built = Path(tmp) / f"{APP_NAME}.app"
             build_bundle(built, Path(tmp))
             install(built, target)
-    except BuildError as exc:
+    # ImportError: build_icon/info_plist import PySide6 and wintranslate into
+    # whatever interpreter runs this, which may not be the venv.
+    # OSError: permissions on --dest, or a symlink where the bundle should be.
+    except (BuildError, ImportError, OSError) as exc:
         print(f"Build failed: {exc}", file=sys.stderr)
         return 1
 

@@ -3,6 +3,7 @@ import requests
 
 from wintranslate.translate import (
     FREE_PROVIDERS,
+    MAX_ENCODED_CHARS,
     MAX_INPUT_CHARS,
     EmptySelectionError,
     Engine,
@@ -173,6 +174,41 @@ class TestInputGuards:
             Translator(session=session).translate("x" * (MAX_INPUT_CHARS + 1))
         assert session.calls == []
 
+    def test_rejects_text_whose_url_would_be_too_long(self):
+        # Under MAX_INPUT_CHARS, but "ệ" percent-encodes to 9 characters.
+        session = _FakeSession()
+        with pytest.raises(SelectionTooLongError):
+            Translator(session=session).translate("ệ" * 3000)
+        assert session.calls == []
+
+    def test_the_url_length_message_explains_itself(self):
+        """Citing MAX_INPUT_CHARS here read as a contradiction: the user saw
+        "Selection is 3,000 characters; the limit is 5,000" and no way to act."""
+        session = _FakeSession()
+        with pytest.raises(SelectionTooLongError) as raised:
+            Translator(session=session).translate("ệ" * 3000)
+        message = str(raised.value)
+        assert "27,000" in message, "says what actually overflowed"
+        assert f"{MAX_ENCODED_CHARS:,}" in message, "and the limit it overflowed"
+        assert "1,777 characters or fewer" in message, "and what would fit"
+        assert f"{MAX_INPUT_CHARS:,}" not in message, "the 5,000 limit is not the one that fired"
+
+    def test_the_plain_character_limit_keeps_its_own_message(self):
+        session = _FakeSession()
+        with pytest.raises(SelectionTooLongError) as raised:
+            Translator(session=session).translate("a" * (MAX_INPUT_CHARS + 1))
+        message = str(raised.value)
+        assert f"{MAX_INPUT_CHARS:,}" in message
+        assert "encoded" not in message
+
+    def test_the_official_engine_is_not_bound_by_the_url_limit(self):
+        """It sends the text in a POST body, so only the free providers care."""
+        session = _FakeSession(
+            _FakeResponse({"data": {"translations": [{"translatedText": "ok"}]}})
+        )
+        translator = Translator(api_key="secret", session=session)
+        assert translator.translate("ệ" * 3000).text == "ok"
+
 
 class TestProviderChain:
     def test_uses_the_first_provider_when_it_answers(self):
@@ -305,7 +341,9 @@ class TestOfficialEngine:
         method, url, kwargs = session.calls[0]
         assert method == "POST"
         assert url.endswith("/language/translate/v2")
-        assert kwargs["params"] == {"key": "secret"}
+        # In a header: error messages quote the URL, and those reach the popup.
+        assert kwargs["headers"] == {"X-goog-api-key": "secret"}
+        assert "secret" not in url and "params" not in kwargs
         assert kwargs["json"]["target"] == "vi"
 
     def test_does_not_fall_back_to_the_free_endpoints(self):
