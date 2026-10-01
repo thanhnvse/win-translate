@@ -39,7 +39,7 @@ MAX_INPUT_CHARS = 5000
 # The free endpoints take the text in a GET URL, where each Vietnamese character
 # percent-encodes to 6-9 characters, so a selection well under MAX_INPUT_CHARS
 # can still be too long for Google to accept.
-# ponytail: fixed cap; switch the free providers to POST if real users hit it.
+# TODO: fixed cap; switch the free providers to POST if real users hit it.
 MAX_ENCODED_CHARS = 16_000
 
 # The free endpoints answer 403 to clients that look automated.
@@ -59,10 +59,21 @@ class EmptySelectionError(TranslateError):
 
 
 class SelectionTooLongError(TranslateError):
-    def __init__(self, length: int) -> None:
+    def __init__(self, length: int, *, encoded: int | None = None) -> None:
+        if encoded is None:
+            super().__init__(
+                f"Selection is {length:,} characters; the limit is {MAX_INPUT_CHARS:,}."
+            )
+            return
+        # Naming MAX_INPUT_CHARS here would read as a contradiction: it is the
+        # encoded size that is too big, so the character count looks fine next
+        # to it. Say what actually overflowed, and what length would fit.
+        fits = max(1, length * MAX_ENCODED_CHARS // encoded)
         super().__init__(
-            f"Selection is {length:,} characters; the limit is {MAX_INPUT_CHARS:,} "
-            "(less for accented or non-Latin text)."
+            f"Selection is {length:,} characters, which become {encoded:,} once "
+            f"encoded into the request URL (limit {MAX_ENCODED_CHARS:,}). "
+            f"Accented text costs several characters each; "
+            f"try about {fits:,} characters or fewer."
         )
 
 
@@ -251,10 +262,14 @@ class Translator:
         if not stripped:
             raise EmptySelectionError()
         is_official = self.engine is Engine.OFFICIAL
-        if len(stripped) > MAX_INPUT_CHARS or (
-            not is_official and len(urllib.parse.quote(stripped)) > MAX_ENCODED_CHARS
-        ):
+        if len(stripped) > MAX_INPUT_CHARS:
             raise SelectionTooLongError(len(stripped))
+        if not is_official:
+            # The official engine sends the text in a POST body, so only the
+            # free providers are bounded by the URL.
+            encoded = len(urllib.parse.quote(stripped))
+            if encoded > MAX_ENCODED_CHARS:
+                raise SelectionTooLongError(len(stripped), encoded=encoded)
 
         target = target or self.target_language
         if is_official:

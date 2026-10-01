@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from wintranslate.selection import (  # noqa: E402
+    SelectionError,
     _key_event,
     _read_clipboard_text,
     _send,
@@ -174,4 +175,9 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     finally:
-        _write_clipboard_text(saved)
+        try:
+            _write_clipboard_text(saved)
+        except SelectionError as exc:
+            # Raising from here would discard the pending SystemExit, so a run
+            # where every check passed would end in a traceback instead.
+            print(f"Could not restore the clipboard: {exc}", file=sys.stderr)

@@ -22,12 +22,15 @@ import subprocess
 import sys
 import threading
 from itertools import count
+from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from .config import Config, ConfigError, config_path
+
+log = logging.getLogger(__name__)
 
 IS_MACOS = sys.platform == "darwin"
 
@@ -42,6 +45,11 @@ from .popup import TranslationPopup
 from .translate import TranslateError, Translator
 
 APP_NAME = "win-translate"
+
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+#: Rotated, because the Windows log is a file nobody prunes and INFO writes a
+#: line per translation.
+_LOG_MAX_BYTES = 512 * 1024
 
 #: Guards against a second copy starting and silently failing to take the hotkey.
 _MUTEX_NAME = "Global\\win-translate-single-instance"
@@ -152,15 +160,21 @@ class TranslateApp:
             self._current_request = request_id
 
         try:
-            text = selection.capture_selection()
+            self._capture_and_translate(request_id)
         except selection.SelectionError as exc:
             self._bridge.failed.emit(request_id, str(exc))
-            return
+        except Exception as exc:  # noqa: BLE001
+            # The listener catches this too, but only to keep its message loop
+            # alive, and under pythonw.exe its log line is somewhere the user
+            # will never think to look. Put it on screen, the way a failed
+            # translation already is -- otherwise the hotkey just does nothing.
+            log.exception("hotkey handling failed")
+            self._bridge.failed.emit(request_id, f"Unexpected error: {exc}")
 
+    def _capture_and_translate(self, request_id: int) -> None:
+        text = selection.capture_selection()
         if not text.strip():
-            self._bridge.failed.emit(
-                request_id, "Nothing was selected."
-            )
+            self._bridge.failed.emit(request_id, "Nothing was selected.")
             return
 
         self._bridge.captured.emit(request_id, text)
@@ -292,14 +306,36 @@ def _explain_accessibility() -> None:
         subprocess.Popen(["open", selection.ACCESSIBILITY_SETTINGS_URL])
 
 
-def main() -> int:
-    # Without a handler, log.exception() from the hotkey callback goes nowhere.
-    # stderr lands in ~/Library/Logs/win-translate.log under start.command.
-    logging.basicConfig(
-        level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+def _configure_logging() -> None:
+    """stderr everywhere, plus a file on Windows.
+
+    macOS keeps stderr: start.command appends it to
+    ~/Library/Logs/win-translate.log. Windows has nowhere for it to go --
+    start.cmd runs pythonw.exe, which has no console and no redirection -- so
+    anything logged there would be lost, which is the whole reason a log exists.
+    """
+    logging.basicConfig(level=logging.WARNING, format=_LOG_FORMAT)
     # One line per translation from our own code; libraries stay at WARNING.
     logging.getLogger("wintranslate").setLevel(logging.INFO)
+    if IS_MACOS:
+        return
+
+    path = config_path().parent / f"{APP_NAME}.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            path, maxBytes=_LOG_MAX_BYTES, backupCount=1, encoding="utf-8"
+        )
+    except OSError as exc:
+        # A missing log is not a reason to refuse to start.
+        logging.warning("no log file at %s: %s", path, exc)
+        return
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    logging.getLogger().addHandler(handler)
+
+
+def main() -> int:
+    _configure_logging()
     app = QApplication([])
     app.setApplicationName(APP_NAME)
     # The popup is an ordinary window as far as Qt is concerned; without this the

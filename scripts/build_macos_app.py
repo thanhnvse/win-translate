@@ -141,12 +141,19 @@ def is_running(app: Path) -> bool:
     # Exact match on the command, not `pgrep -f`: that takes the path as a regex
     # and also matches any process that merely mentions it (an editor, `tail`).
     executable = str(app / "Contents" / "MacOS" / APP_NAME)
-    commands = subprocess.run(
-        ["ps", "-axo", "command="], capture_output=True, text=True, check=True
-    ).stdout.splitlines()
+    try:
+        listing = subprocess.run(
+            ["ps", "-axo", "command="], capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Refuse rather than guess. Returning False here would let install()
+        # rmtree a bundle that is still running. CalledProcessError is a
+        # SubprocessError, not an OSError, so main()'s handler misses it.
+        raise BuildError(f"Could not check whether {APP_NAME} is running: {exc}") from exc
+    # strip() before matching too: a command padded by ps must still match.
     return any(
-        line.strip() == executable or line.startswith(executable + " ")
-        for line in commands
+        line.strip() == executable or line.strip().startswith(executable + " ")
+        for line in listing.splitlines()
     )
 
 

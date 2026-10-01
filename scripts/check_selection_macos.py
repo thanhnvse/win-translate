@@ -135,7 +135,11 @@ def main() -> int:
         # Only when a check actually wrote to it; None empties the board rather
         # than leaving the sentinel behind.
         if board.changeCount() != count_before:
-            _write_pasteboard_text(board, saved)
+            try:
+                _write_pasteboard_text(board, saved)
+            except Exception as exc:  # noqa: BLE001
+                # Raising from here would discard run_checks()' return value.
+                print(f"Could not restore the clipboard: {exc}", file=sys.stderr)
 
 
 def run_checks() -> int:
