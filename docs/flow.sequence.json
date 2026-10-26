@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "win-translate — one translation, end to end",
+    "viewBox": [1060, 940],
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "locale": "en"
+  },
+  "participants": [
+    { "id": "user", "type": "external", "label": "You", "sublabel": "select + hotkey" },
+    { "id": "focused", "type": "external", "label": "Focused app", "sublabel": "Chrome, Word, IDE" },
+    { "id": "listener", "type": "backend", "label": "Hotkey listener", "sublabel": "own Win32 thread" },
+    { "id": "clipboard", "type": "database", "label": "Clipboard", "sublabel": "Win32 / AppKit" },
+    { "id": "qt", "type": "frontend", "label": "Qt main thread", "sublabel": "tray + popup" },
+    { "id": "worker", "type": "backend", "label": "Worker thread", "sublabel": "short-lived, HTTP" },
+    { "id": "google", "type": "external", "label": "Google Translate", "sublabel": "free chain or v2" }
+  ],
+  "segments": [
+    { "from": 160, "to": 462, "label": "1 · Capture — hotkey thread" },
+    { "from": 476, "to": 766, "label": "2 · Translate — worker thread" },
+    { "from": 776, "to": 852, "label": "3 · Show — Qt thread" }
+  ],
+  "messages": [
+    {
+      "id": "press",
+      "from": "user",
+      "to": "listener",
+      "y": 190,
+      "label": "press Ctrl+Alt+T",
+      "variant": "emphasis",
+      "note": "RegisterHotKey reports only this one combination. A keyboard hook would see every keystroke typed, including passwords."
+    },
+    { "id": "save", "from": "listener", "to": "clipboard", "y": 232, "label": "save what is on it" },
+    {
+      "id": "copy",
+      "from": "listener",
+      "to": "focused",
+      "y": 274,
+      "label": "release held modifiers, then Ctrl+C",
+      "variant": "emphasis",
+      "note": "Ctrl+Alt is still physically down. Without releasing it first the app receives Ctrl+Alt+C, which is not a copy."
+    },
+    { "id": "put", "from": "focused", "to": "clipboard", "y": 316, "label": "copy the selection" },
+    {
+      "id": "poll",
+      "from": "listener",
+      "to": "clipboard",
+      "y": 358,
+      "label": "poll GetClipboardSequenceNumber",
+      "variant": "dashed",
+      "note": "Copying is asynchronous. A fixed sleep truncates on a slow app and wastes time on a fast one."
+    },
+    { "id": "text", "from": "clipboard", "to": "listener", "y": 400, "label": "selected text", "variant": "return" },
+    {
+      "id": "restore",
+      "from": "listener",
+      "to": "clipboard",
+      "y": 442,
+      "label": "put the old contents back",
+      "variant": "dashed",
+      "note": "Only text survives the round trip. An image or a file list on the clipboard is cleared rather than restored."
+    },
+    {
+      "id": "captured",
+      "from": "listener",
+      "to": "qt",
+      "y": 492,
+      "label": "captured signal (queued)",
+      "variant": "emphasis",
+      "note": "Crosses to the Qt thread. Every widget touch happens here and nowhere else."
+    },
+    { "id": "pending", "from": "qt", "to": "user", "y": 534, "label": "popup: TRANSLATING…" },
+    {
+      "id": "spawn",
+      "from": "listener",
+      "to": "worker",
+      "y": 576,
+      "label": "one thread per request",
+      "variant": "dashed",
+      "note": "The HTTP call sits on a third thread so a slow network cannot freeze the popup that is already on screen."
+    },
+    { "id": "try1", "from": "worker", "to": "google", "y": 618, "label": "free endpoint 1 of 3" },
+    {
+      "id": "blocked",
+      "from": "google",
+      "to": "worker",
+      "y": 660,
+      "label": "HTTP 429",
+      "variant": "return",
+      "note": "Measured, not assumed: translate.googleapis.com is throttled from some networks while clients5 answers normally."
+    },
+    { "id": "try2", "from": "worker", "to": "google", "y": 702, "label": "next endpoint in the chain", "variant": "emphasis" },
+    {
+      "id": "result",
+      "from": "google",
+      "to": "worker",
+      "y": 744,
+      "label": "translation + detected language",
+      "variant": "return",
+      "note": "If the detected language is already the target, it asks again in the other direction. Only the reverse direction costs two requests."
+    },
+    {
+      "id": "translated",
+      "from": "worker",
+      "to": "qt",
+      "y": 786,
+      "label": "translated signal (queued)",
+      "variant": "emphasis",
+      "note": "Carries the request_id. A slower earlier request is discarded; only the newest one is painted."
+    },
+    { "id": "show", "from": "qt", "to": "user", "y": 828, "label": "popup beside the cursor" }
+  ],
+  "activations": [
+    { "participant": "listener", "from": 184, "to": 582, "type": "backend" },
+    { "participant": "clipboard", "from": 226, "to": 450, "type": "database" },
+    { "participant": "focused", "from": 268, "to": 324, "type": "external" },
+    { "participant": "qt", "from": 486, "to": 836, "type": "frontend" },
+    { "participant": "worker", "from": 570, "to": 794, "type": "backend" },
+    { "participant": "google", "from": 612, "to": 752, "type": "external" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Three threads, and why",
+      "items": [
+        "The hotkey thread captures the selection in place, because it has to happen while the other app still owns the foreground",
+        "The Qt main thread owns every widget — the popup is touched from here and nowhere else",
+        "The worker thread holds the HTTP call, so a slow network cannot freeze a popup that is already on screen"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Why it borrows the clipboard",
+      "items": [
+        "Windows has no API to ask another process what it has selected",
+        "UI Automation's TextPattern answers for some controls, but Chrome and Electron do not expose it reliably",
+        "So: save the clipboard, synthesise Ctrl+C, wait for the sequence number to move, read, put it back"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "What differs on macOS",
+      "items": [
+        "Carbon RegisterEventHotKey delivers through the Qt event loop, so there are TWO threads here, not three",
+        "Cmd+C is sent again when the first copy goes unanswered, and the whole path needs Accessibility permission",
+        "A real right-click entry is only reachable on this side, through NSServices — still not built"
+      ]
+    }
+  ]
+}

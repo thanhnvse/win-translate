@@ -163,6 +163,57 @@ those, which is why `ctrl+t` is the default there.
 
 ## How it works
 
+One translation, from the key press to the popup. The three lifelines that own
+work are the three threads; the clipboard is in the picture because Windows
+offers no other way to read another process's selection.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as You
+    participant A as Focused app
+    participant H as Hotkey listener
+    participant C as Clipboard
+    participant Q as Qt main thread
+    participant W as Worker thread
+    participant G as Google Translate
+
+    U->>H: press Ctrl+Alt+T
+    activate H
+    H->>C: save what is on it
+    H->>A: release held modifiers, then Ctrl+C
+    A->>C: copy the selection
+    H-->>C: poll GetClipboardSequenceNumber
+    C-->>H: selected text
+    H-->>C: put the old contents back
+    Note over H,C: Windows cannot be asked what another process<br/>has selected, so the clipboard is borrowed and restored
+
+    H->>Q: captured signal (queued)
+    activate Q
+    Q->>U: popup: TRANSLATING...
+    H--)W: one thread per request
+    deactivate H
+    activate W
+    W->>G: free endpoint 1 of 3
+    G-->>W: HTTP 429
+    W->>G: next endpoint in the chain
+    G-->>W: translation + detected language
+    Note over W,G: One host answering 429 says nothing<br/>about the next, hence the chain
+    W->>Q: translated signal (queued)
+    deactivate W
+    Q->>U: popup beside the cursor
+    deactivate Q
+```
+
+On macOS the hotkey arrives through the Qt event loop instead of a thread of
+its own, so that side has two threads rather than three.
+
+[`docs/flow.html`](docs/flow.html) is the same diagram with the reasoning
+attached to every step: click a message to read why it is there. It is a
+self-contained page, so open it from a clone — GitHub serves it as source
+rather than rendering it. Regenerate it from
+[`docs/flow.sequence.json`](docs/flow.sequence.json) when the flow changes.
+
 * **Hotkey** — Win32 `RegisterHotKey` on a dedicated thread with its own message
   loop. Not a keyboard hook: a hook would see every keystroke the user types,
   including passwords, and need elevation to watch elevated apps.
