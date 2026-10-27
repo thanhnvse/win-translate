@@ -74,16 +74,26 @@ Or just double-click `start.cmd`.
 ### Terminals and CLI apps
 
 Apps that take the mouse inside a terminal (Claude Code, vim, tmux, htop...)
-select text themselves and copy it to the clipboard on release; the terminal
-holds no selection, so a synthesised Ctrl+C would copy nothing and reach the app
-as an interrupt instead. When the focused window is a terminal (Windows
-Terminal, the classic console, mintty, ConEmu, WezTerm) and the clipboard changed
-in the last 8 seconds, win-translate translates that copy and sends no
-keystroke. No need to hold Shift to fall back to the terminal's own selection.
+select text themselves and copy it to the clipboard when you release the mouse.
+The terminal holds no selection, so the Ctrl+C that win-translate sends copies
+nothing. You do not need to hold Shift to make the terminal select instead.
 
-Otherwise, in a terminal it copies with Ctrl+Insert rather than Ctrl+C: the
-terminals above copy their own selection with it too, and with nothing selected
-it reaches the app as a harmless Insert instead of stopping the running program.
+The rule is exact: win-translate always sends Ctrl+C. If the clipboard changes,
+that is the selection. If it does not change, win-translate uses the text that
+is already on the clipboard only when both of these are true:
+
+* it was put there while the window that has focus now had focus, and
+* win-translate did not put it there itself (for example with the popup's Copy
+  button).
+
+A copy made in another application before you switched to this window is never
+used. Each such copy is used once; the next press needs a new selection. Note
+that "while the window had focus" also covers a background program that writes
+to the clipboard during that time, such as clipboard sync from another device.
+
+With nothing selected at all, the Ctrl+C reaches the program in the terminal as
+usual, which can interrupt it. Claude Code treats Ctrl+C as copy while it has a
+selection, so pressing the hotkey right after selecting there is safe.
 
 ### Start with Windows
 

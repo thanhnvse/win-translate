@@ -99,7 +99,7 @@ class TranslateApp:
     def start(self) -> None:
         self._hotkey.start()
         if not IS_MACOS:
-            selection.watch_clipboard()
+            selection.start_focus_watch()
         if IS_MACOS and not selection.request_accessibility():
             _explain_accessibility()
         self._tray.show()
@@ -117,6 +117,8 @@ class TranslateApp:
 
     def shutdown(self) -> None:
         self._hotkey.stop()
+        if not IS_MACOS:
+            selection.stop_focus_watch()
         self._tray.hide()
 
     # -- tray ---------------------------------------------------------------
