@@ -70,6 +70,8 @@ _CLIPBOARD_OPEN_ATTEMPTS = 8
 _CLIPBOARD_OPEN_DELAY = 0.01
 
 WM_QUIT = 0x0012
+TH32CS_SNAPPROCESS = 0x00000002
+INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
 WINEVENT_OUTOFCONTEXT = 0x0000
 EVENT_SYSTEM_FOREGROUND = 0x0003
 
@@ -111,6 +113,21 @@ class _INPUTUNION(ctypes.Union):
     _fields_ = [("mi", _MOUSEINPUT), ("ki", _KEYBDINPUT), ("hi", _HARDWAREINPUT)]
 
 
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ULONG_PTR),
+        ("th32ModuleID", wintypes.DWORD),
+        ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD),
+        ("pcPriClassBase", wintypes.LONG),
+        ("dwFlags", wintypes.DWORD),
+        ("szExeFile", ctypes.c_wchar * 260),
+    ]
+
+
 class INPUT(ctypes.Structure):
     _anonymous_ = ("u",)
     _fields_ = [("type", wintypes.DWORD), ("u", _INPUTUNION)]
@@ -143,6 +160,11 @@ kernel32.GlobalUnlock.argtypes = (wintypes.HGLOBAL,)
 kernel32.GlobalAlloc.argtypes = (wintypes.UINT, ctypes.c_size_t)
 kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
 kernel32.GlobalFree.argtypes = (wintypes.HGLOBAL,)
+kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+kernel32.Process32FirstW.argtypes = (wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+kernel32.Process32NextW.argtypes = (wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 
 
 class _FocusWatch:
@@ -227,13 +249,48 @@ def stop_focus_watch() -> None:
     _focus.stop()
 
 
+def _window_pid(hwnd: int | None) -> int:
+    pid = wintypes.DWORD()
+    return pid.value if hwnd and user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) else 0
+
+
 def _clipboard_owner_pid() -> int:
-    owner, pid = user32.GetClipboardOwner(), wintypes.DWORD()
-    return pid.value if owner and user32.GetWindowThreadProcessId(owner, ctypes.byref(pid)) else 0
+    return _window_pid(user32.GetClipboardOwner())
+
+
+def _process_parents() -> dict[int, int]:
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot in (None, INVALID_HANDLE_VALUE):
+        return {}
+    try:
+        entry = PROCESSENTRY32W(dwSize=ctypes.sizeof(PROCESSENTRY32W))
+        parents = {}
+        found = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while found:
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID
+            found = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        return parents
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+
+def _descends_from(pid: int, ancestor: int, parents: dict[int, int]) -> bool:
+    seen = set()
+    while pid and pid not in seen:
+        if pid == ancestor:
+            return True
+        seen.add(pid)
+        pid = parents.get(pid, 0)
+    return False
+
+
+def _owned_by(hwnd: int | None) -> bool:
+    owner = _clipboard_owner_pid()
+    return owner != os.getpid() and (owner == 0 or _descends_from(owner, _window_pid(hwnd), _process_parents()))
 
 
 def _copied_in(hwnd: int | None) -> bool:
-    return _focus.copied_while_focused(hwnd) and _clipboard_owner_pid() != os.getpid()
+    return _focus.copied_while_focused(hwnd) and _owned_by(hwnd)
 
 
 def _clipboard_snapshot() -> tuple[int, str | None]:

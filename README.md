@@ -80,16 +80,23 @@ nothing. You do not need to hold Shift to make the terminal select instead.
 
 The rule is exact: win-translate always sends Ctrl+C. If the clipboard changes,
 that is the selection. If it does not change, win-translate uses the text that
-is already on the clipboard only when both of these are true:
+is already on the clipboard only when all of these are true:
 
-* it was put there while the window that has focus now had focus, and
+* it was put there while the window that has focus now had focus,
+* it was put there by that window's own program or a program it started (Claude
+  Code copies through a short-lived PowerShell), or by a program that has
+  already exited, and
 * win-translate did not put it there itself (for example with the popup's Copy
   button).
 
-A copy made in another application before you switched to this window is never
-used. Each such copy is used once; the next press needs a new selection. Note
-that "while the window had focus" also covers a background program that writes
-to the clipboard during that time, such as clipboard sync from another device.
+Each such copy is used once; the next press needs a new selection.
+
+So a copy made in another application before you switched to this window is
+never used, and neither is a copy another running application makes in the
+background while this window has focus, such as a password manager's global
+"copy password" hotkey. What can still count is an explicit copy you make in
+this same window (for example Ctrl+C on other text), or a copy by a program that
+writes to the clipboard and exits straight away.
 
 With nothing selected at all, the Ctrl+C reaches the program in the terminal as
 usual, which can interrupt it. Claude Code treats Ctrl+C as copy while it has a

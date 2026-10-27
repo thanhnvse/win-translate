@@ -9,6 +9,8 @@ pytestmark = pytest.mark.skipif(
 
 TERMINAL = 101
 OTHER_APP = 202
+PIDS = {TERMINAL: 800, OTHER_APP: 900}
+PARENTS = {600: 700, 700: 800, 500: 4}
 
 
 @pytest.fixture
@@ -38,6 +40,8 @@ def desktop(selection, monkeypatch):
     monkeypatch.setattr(selection.user32, "GetClipboardSequenceNumber", lambda: state["sequence"])
     monkeypatch.setattr(selection.user32, "GetForegroundWindow", lambda: state["foreground"])
     monkeypatch.setattr(selection, "_clipboard_owner_pid", lambda: state["owner"])
+    monkeypatch.setattr(selection, "_window_pid", lambda hwnd: PIDS.get(hwnd, 0))
+    monkeypatch.setattr(selection, "_process_parents", lambda: PARENTS)
     monkeypatch.setattr(selection, "_read_clipboard_text", lambda: state["text"])
     monkeypatch.setattr(selection, "_write_clipboard_text", write)
     state["write"] = write
@@ -90,6 +94,12 @@ class TestACopyOnSelectApp:
         desktop["copy"]("selected in Claude Code")
         assert selection.capture_selection() == "selected in Claude Code"
 
+    def test_its_copy_is_used_when_a_child_process_of_the_window_made_it(self, selection, desktop):
+        focus(selection, desktop, TERMINAL)
+        desktop["copy"]("copied by Claude Code through PowerShell")
+        desktop["owner"] = 600
+        assert selection.capture_selection() == "copied by Claude Code through PowerShell"
+
     def test_its_copy_is_used_once_not_on_every_later_press(self, selection, desktop):
         focus(selection, desktop, TERMINAL)
         desktop["copy"]("selected in Claude Code")
@@ -123,6 +133,12 @@ class TestCopiesThatAreNotTheSelection:
         focus(selection, desktop, OTHER_APP)
         assert selection.capture_selection() == ""
 
+    def test_a_background_copy_by_another_running_app_is_ignored(self, selection, desktop):
+        focus(selection, desktop, TERMINAL)
+        desktop["copy"]("hunter2-my-actual-password")
+        desktop["owner"] = 500
+        assert selection.capture_selection() == ""
+
     def test_our_own_popup_copy_is_ignored(self, selection, desktop):
         focus(selection, desktop, TERMINAL)
         desktop["copy"]("the previous translation")
@@ -137,6 +153,17 @@ class TestCopiesThatAreNotTheSelection:
         selection.capture_selection()
         desktop["copy"]("hunter2-my-actual-password")
         assert selection.capture_selection() == ""
+
+
+class TestProcessTree:
+    def test_reads_the_real_parent_of_this_process(self, selection):
+        parents = selection._process_parents()
+        assert parents[os.getpid()] == os.getppid()
+        assert selection._descends_from(os.getpid(), os.getppid(), parents)
+        assert not selection._descends_from(os.getppid(), os.getpid(), parents)
+
+    def test_a_parent_loop_ends(self, selection):
+        assert not selection._descends_from(1, 99, {1: 2, 2: 1})
 
 
 class TestFocusWatch:
