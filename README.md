@@ -71,6 +71,37 @@ get Vietnamese; select Vietnamese and you get English. One hotkey, both ways.
 
 Or just double-click `start.cmd`.
 
+### Terminals and CLI apps
+
+Apps that take the mouse inside a terminal (Claude Code, vim, tmux, htop...)
+select text themselves and copy it to the clipboard when you release the mouse.
+The terminal holds no selection, so the Ctrl+C that win-translate sends copies
+nothing. You do not need to hold Shift to make the terminal select instead.
+
+The rule is exact: win-translate always sends Ctrl+C. If the clipboard changes,
+that is the selection. If it does not change, win-translate uses the text that
+is already on the clipboard only when all of these are true:
+
+* it was put there while the window that has focus now had focus,
+* it was put there by that window's own program or a program it started (Claude
+  Code copies through a short-lived PowerShell), or by a program that has
+  already exited, and
+* win-translate did not put it there itself (for example with the popup's Copy
+  button).
+
+Each such copy is used once; the next press needs a new selection.
+
+So a copy made in another application before you switched to this window is
+never used, and neither is a copy another running application makes in the
+background while this window has focus, such as a password manager's global
+"copy password" hotkey. What can still count is an explicit copy you make in
+this same window (for example Ctrl+C on other text), or a copy by a program that
+writes to the clipboard and exits straight away.
+
+With nothing selected at all, the Ctrl+C reaches the program in the terminal as
+usual, which can interrupt it. Claude Code treats Ctrl+C as copy while it has a
+selection, so pressing the hotkey right after selecting there is safe.
+
 ### Start with Windows
 
 Put a shortcut to `pythonw.exe -m wintranslate` in:
