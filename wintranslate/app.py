@@ -98,6 +98,8 @@ class TranslateApp:
 
     def start(self) -> None:
         self._hotkey.start()
+        if not IS_MACOS:
+            selection.watch_clipboard()
         if IS_MACOS and not selection.request_accessibility():
             _explain_accessibility()
         self._tray.show()

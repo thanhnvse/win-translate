@@ -26,6 +26,7 @@ clipboard held an image or a file list, it is cleared rather than restored.
 from __future__ import annotations
 
 import ctypes
+import threading
 import time
 from ctypes import wintypes
 
@@ -35,10 +36,12 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 ULONG_PTR = ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint32
 
 INPUT_KEYBOARD = 1
+KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 
 VK_CONTROL = 0x11
 VK_C = 0x43
+VK_INSERT = 0x2D
 
 # The left/right specific codes, because releasing VK_SHIFT does not reliably
 # clear a right-shift that is physically down.
@@ -63,6 +66,19 @@ _COPY_POLL_INTERVAL = 0.015
 #: Another process can hold the clipboard open; a few quick retries clear it.
 _CLIPBOARD_OPEN_ATTEMPTS = 8
 _CLIPBOARD_OPEN_DELAY = 0.01
+
+_RECENT_COPY_SECONDS = 8.0
+_CLIPBOARD_WATCH_INTERVAL = 0.1
+
+_TERMINAL_WINDOW_CLASSES = frozenset(
+    {
+        "mintty",
+        "ConsoleWindowClass",
+        "VirtualConsoleClass",
+        "org.wezfurlong.wezterm",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+    }
+)
 
 
 class SelectionError(Exception):
@@ -112,6 +128,8 @@ user32.SendInput.restype = wintypes.UINT
 user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 user32.OpenClipboard.argtypes = (wintypes.HWND,)
 user32.GetClipboardData.argtypes = (wintypes.UINT,)
 user32.GetClipboardData.restype = wintypes.HANDLE
@@ -125,13 +143,66 @@ kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
 kernel32.GlobalFree.argtypes = (wintypes.HGLOBAL,)
 
 
-def _key_event(vk: int, key_up: bool) -> INPUT:
+class _ClipboardWatch:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._sequence = user32.GetClipboardSequenceNumber()
+        self._changed_at: float | None = None
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(
+                target=self._run, name="win-translate-clipboard", daemon=True
+            )
+            self._thread.start()
+
+    def poll(self) -> None:
+        with self._lock:
+            sequence = user32.GetClipboardSequenceNumber()
+            if sequence != self._sequence:
+                self._sequence, self._changed_at = sequence, time.monotonic()
+
+    def changed_recently(self) -> bool:
+        with self._lock:
+            return (
+                self._changed_at is not None
+                and time.monotonic() - self._changed_at <= _RECENT_COPY_SECONDS
+            )
+
+    def forget(self) -> None:
+        with self._lock:
+            self._sequence, self._changed_at = user32.GetClipboardSequenceNumber(), None
+
+    def _run(self) -> None:
+        while True:
+            self.poll()
+            time.sleep(_CLIPBOARD_WATCH_INTERVAL)
+
+
+_clipboard = _ClipboardWatch()
+
+
+def watch_clipboard() -> None:
+    _clipboard.start()
+
+
+def _window_class(hwnd: int | None) -> str:
+    buffer = ctypes.create_unicode_buffer(256)
+    return buffer.value if hwnd and user32.GetClassNameW(hwnd, buffer, len(buffer)) else ""
+
+
+def _is_terminal(hwnd: int | None) -> bool:
+    return _window_class(hwnd) in _TERMINAL_WINDOW_CLASSES
+
+
+def _key_event(vk: int, key_up: bool, extended: bool = False) -> INPUT:
     event = INPUT()
     event.type = INPUT_KEYBOARD
     event.ki = _KEYBDINPUT(
         wVk=vk,
         wScan=0,
-        dwFlags=KEYEVENTF_KEYUP if key_up else 0,
+        dwFlags=(KEYEVENTF_KEYUP if key_up else 0) | (KEYEVENTF_EXTENDEDKEY if extended else 0),
         time=0,
         dwExtraInfo=0,
     )
@@ -215,15 +286,20 @@ def capture_selection() -> str:
     keystroke could not be delivered. Returns an empty string when the app
     answered the copy but there was nothing selected.
     """
+    terminal = _is_terminal(user32.GetForegroundWindow())
+    if terminal and _clipboard.changed_recently():
+        return _read_clipboard_text() or ""
+
     previous_text = _read_clipboard_text()
     sequence_before = user32.GetClipboardSequenceNumber()
 
     released = _held_modifiers()
     events = [_key_event(vk, key_up=True) for vk in released]
+    copy_key = VK_INSERT if terminal else VK_C
     events += [
         _key_event(VK_CONTROL, key_up=False),
-        _key_event(VK_C, key_up=False),
-        _key_event(VK_C, key_up=True),
+        _key_event(copy_key, key_up=False, extended=terminal),
+        _key_event(copy_key, key_up=True, extended=terminal),
         _key_event(VK_CONTROL, key_up=True),
     ]
     _send(events)
@@ -249,5 +325,6 @@ def capture_selection() -> str:
         # Losing the old clipboard is annoying but must not sink a translation
         # the user is waiting for.
         pass
+    _clipboard.forget()
 
     return selected

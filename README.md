@@ -71,6 +71,20 @@ get Vietnamese; select Vietnamese and you get English. One hotkey, both ways.
 
 Or just double-click `start.cmd`.
 
+### Terminals and CLI apps
+
+Apps that take the mouse inside a terminal (Claude Code, vim, tmux, htop...)
+select text themselves and copy it to the clipboard on release; the terminal
+holds no selection, so a synthesised Ctrl+C would copy nothing and reach the app
+as an interrupt instead. When the focused window is a terminal (Windows
+Terminal, the classic console, mintty, ConEmu, WezTerm) and the clipboard changed
+in the last 8 seconds, win-translate translates that copy and sends no
+keystroke. No need to hold Shift to fall back to the terminal's own selection.
+
+Otherwise, in a terminal it copies with Ctrl+Insert rather than Ctrl+C: the
+terminals above copy their own selection with it too, and with nothing selected
+it reaches the app as a harmless Insert instead of stopping the running program.
+
 ### Start with Windows
 
 Put a shortcut to `pythonw.exe -m wintranslate` in:
