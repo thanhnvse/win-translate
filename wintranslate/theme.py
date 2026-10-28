@@ -5,14 +5,20 @@ shadow instead of a hard border, a bold line of text, and equal pill buttons at
 the bottom. Geometry is the same in every theme; only the palette changes, so
 switching theme cannot break the layout.
 
-Contrast is the thing to watch here. The popup once shipped with near-white
-text on a white viewport, so every text token is checked against its own card
-in the tests rather than eyeballed.
+Gradients are kept as **stops**, not as finished ``qlineargradient(...)``
+strings. A string can only be checked by sampling the pixels it eventually
+paints, and the pixel checks written for this popup have been wrong more often
+than the code they tested. Stops can be compared directly, so
+``tests/test_settings.py`` measures every text colour against every card colour
+and fails on the worst pair rather than on an average of anti-aliased noise.
+
+Contrast is the thing to watch: this popup once shipped with near-white text on
+a white viewport.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets" / "ui"
@@ -26,51 +32,78 @@ SHADOW_MARGIN = 24
 RADIUS = 20
 CARD_PADDING = 22
 
+Stops = tuple[tuple[float, str], ...]
+
+
+def gradient(stops: Stops, direction: str = "diagonal") -> str:
+    """Build a Qt stylesheet gradient. Qt accepts one for ``color`` too, which
+    is how the translation carries a gradient without any new painting code."""
+    coords = {
+        "diagonal": "x1:0, y1:0, x2:1, y2:1",
+        "horizontal": "x1:0, y1:0, x2:1, y2:0",
+        "vertical": "x1:0, y1:0, x2:0, y2:1",
+    }[direction]
+    body = ", ".join(f"stop:{at} {colour}" for at, colour in stops)
+    return f"qlineargradient({coords}, {body})"
+
 
 @dataclass(frozen=True)
 class Theme:
     key: str
     label: str
-    card: str
-    rim: str
-    shadow: str
-    shadow_alpha: int
+    card_stops: Stops
+    #: Solid colour for headings and for the translation when there is no
+    #: gradient. Also the settings window's title.
     title: str
     dim: str
     text: str
     error: str
     accent: str
+    rim: str
+    shadow: str
+    shadow_alpha: int
     divider: str
     control: str
     control_rim: str
-    primary_bg: str
     primary_fg: str
     secondary_bg: str
     secondary_fg: str
     scrollbar: str
     #: Which chevron asset reads on this theme's controls.
     chevron: str
+    #: Empty means the translation is drawn in `title`.
+    text_stops: Stops = ()
+    #: Empty means the primary button is filled with `accent`.
+    primary_stops: Stops = ()
+
+    @property
+    def card(self) -> str:
+        return gradient(self.card_stops)
+
+    @property
+    def translation_colour(self) -> str:
+        return gradient(self.text_stops, "horizontal") if self.text_stops else self.title
+
+    @property
+    def primary_bg(self) -> str:
+        return gradient(self.primary_stops, "horizontal") if self.primary_stops else self.accent
 
 
 LIGHT = Theme(
     key="light",
     label="Light",
-    card=(
-        "qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-        " stop:0 #fdfeff, stop:0.55 #f3f6fb, stop:1 #e8eff9)"
-    ),
-    rim="rgba(255,255,255,0.95)",
-    shadow="#8fa3c8",
-    shadow_alpha=150,
+    card_stops=((0.0, "#fdfeff"), (0.55, "#f3f6fb"), (1.0, "#e8eff9")),
     title="#101114",
     dim="#6b7280",
     text="#15171c",
     error="#b3261e",
     accent="#0a84ff",
+    rim="rgba(255,255,255,0.95)",
+    shadow="#8fa3c8",
+    shadow_alpha=150,
     divider="rgba(16,17,20,0.08)",
     control="#ffffff",
     control_rim="rgba(16,17,20,0.12)",
-    primary_bg="#0a84ff",
     primary_fg="#ffffff",
     secondary_bg="#e9ecf2",
     secondary_fg="#3a3f4a",
@@ -81,22 +114,18 @@ LIGHT = Theme(
 DARK = Theme(
     key="dark",
     label="Dark",
-    card=(
-        "qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-        " stop:0 #2a2b31, stop:0.55 #212229, stop:1 #191a1f)"
-    ),
-    rim="rgba(255,255,255,0.12)",
-    shadow="#05060a",
-    shadow_alpha=200,
+    card_stops=((0.0, "#2a2b31"), (0.55, "#212229"), (1.0, "#191a1f")),
     title="#f7f7f9",
     dim="#9a9ba4",
     text="#f2f3f5",
     error="#ff8a80",
     accent="#0a84ff",
+    rim="rgba(255,255,255,0.12)",
+    shadow="#05060a",
+    shadow_alpha=200,
     divider="rgba(255,255,255,0.09)",
     control="#2f3036",
     control_rim="rgba(255,255,255,0.13)",
-    primary_bg="#0a84ff",
     primary_fg="#ffffff",
     secondary_bg="#3a3b43",
     secondary_fg="#dcdee4",
@@ -104,33 +133,79 @@ DARK = Theme(
     chevron="light",
 )
 
+#: Pastel card, saturated text. The light theme's quiet greys would disappear
+#: on it, so every token here is pulled toward the purple end.
 COLORFUL = Theme(
     key="colorful",
     label="Colorful",
-    card=(
-        "qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-        " stop:0 #fff1f8, stop:0.5 #eef0ff, stop:1 #e6f7ff)"
+    card_stops=(
+        (0.0, "#ffeaf6"),
+        (0.28, "#f0e7ff"),
+        (0.55, "#e4f0ff"),
+        (0.8, "#e2fbf3"),
+        (1.0, "#fff6e3"),
     ),
+    text_stops=(
+        (0.0, "#b5179e"),
+        (0.4, "#5a189a"),
+        (0.72, "#1e6091"),
+        (1.0, "#12715a"),
+    ),
+    primary_stops=((0.0, "#c13bb0"), (1.0, "#5b5bd6")),
+    title="#5a189a",
+    dim="#8a7f9c",
+    text="#2b2345",
+    error="#b3123f",
+    accent="#c13bb0",
     rim="rgba(255,255,255,0.95)",
-    shadow="#9b8fd0",
+    shadow="#b09ccb",
     shadow_alpha=150,
-    title="#1b1640",
-    dim="#6d6794",
-    text="#1b1740",
-    error="#c2185b",
-    accent="#7b5bd6",
     divider="rgba(27,23,64,0.09)",
     control="rgba(255,255,255,0.86)",
     control_rim="rgba(27,23,64,0.12)",
-    primary_bg="#7b5bd6",
     primary_fg="#ffffff",
-    secondary_bg="rgba(255,255,255,0.78)",
-    secondary_fg="#3f3a74",
+    secondary_bg="rgba(255,255,255,0.80)",
+    secondary_fg="#5a4b73",
     scrollbar="rgba(27,23,64,0.24)",
     chevron="dim",
 )
 
-THEMES: tuple[Theme, ...] = (LIGHT, DARK, COLORFUL)
+#: Near black, so the letters carry all the colour.
+NEON = Theme(
+    key="neon",
+    label="Neon",
+    card_stops=(
+        (0.0, "#0a0a12"),
+        (0.4, "#140f26"),
+        (0.72, "#1c1033"),
+        (1.0, "#0d1226"),
+    ),
+    text_stops=(
+        (0.0, "#ff4ecd"),
+        (0.3, "#b06cff"),
+        (0.62, "#4ad7ff"),
+        (1.0, "#5affc8"),
+    ),
+    primary_stops=((0.0, "#ff4ecd"), (1.0, "#4ad7ff")),
+    title="#e9d9ff",
+    dim="#8f87b8",
+    text="#efe9ff",
+    error="#ff6b9d",
+    accent="#ff4ecd",
+    rim="rgba(255,255,255,0.12)",
+    shadow="#000008",
+    shadow_alpha=210,
+    divider="rgba(255,255,255,0.09)",
+    control="#1a1630",
+    control_rim="rgba(255,255,255,0.14)",
+    primary_fg="#0a0a12",
+    secondary_bg="rgba(255,255,255,0.08)",
+    secondary_fg="#c6bdea",
+    scrollbar="rgba(255,255,255,0.26)",
+    chevron="light",
+)
+
+THEMES: tuple[Theme, ...] = (LIGHT, DARK, COLORFUL, NEON)
 BY_KEY: dict[str, Theme] = {option.key: option for option in THEMES}
 DEFAULT = LIGHT
 
@@ -211,7 +286,6 @@ QAbstractSpinBox::down-arrow {{
     font-size: 12px;
     font-weight: 600;
 }}
-#primary:hover {{ background: {theme.accent}; }}
 #primary:pressed {{ padding-top: 10px; padding-bottom: 8px; }}
 #secondary {{
     background: {theme.secondary_bg};
@@ -227,6 +301,9 @@ QAbstractSpinBox::down-arrow {{
 
 
 def popup_stylesheet(theme: Theme) -> str:
+    # The state selectors are more specific than #translation, so a gradient
+    # set there does not bleed into the error or waiting states -- those stay
+    # one colour, which is what makes them read as not-a-translation.
     return f"""
 #card {{
     background: {theme.card};
@@ -239,17 +316,20 @@ def popup_stylesheet(theme: Theme) -> str:
     font-weight: 600;
     letter-spacing: 0.6px;
 }}
-#translation {{ color: {theme.title}; font-size: 15px; font-weight: 600; }}
+#translation {{ color: {theme.translation_colour}; font-size: 15px; font-weight: 600; }}
 #translation[state="error"] {{ color: {theme.error}; font-weight: 600; }}
 #translation[state="pending"] {{ color: {theme.dim}; font-weight: 400; font-style: italic; }}
 #source {{ color: {theme.dim}; font-size: 11px; }}
 {_controls(theme)}
 /* The scroll area's viewport is a separate widget with its own palette and
-   defaults to QPalette.Base. Without these three selectors the translation is
-   drawn on a white block whatever the theme says. */
-QScrollArea,
-QScrollArea > QWidget,
-QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+   defaults to QPalette.Base, so without this the translation is drawn on a
+   white block whatever the theme says.
+   The viewport is named, rather than reached with `QScrollArea > QWidget >
+   QWidget`: that selector also matches the translation label inside it, and a
+   gradient `color` collapses to its last stop on any widget a background rule
+   touches. Measured -- the four-stop text went flat #12715a. */
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget#qt_scrollarea_viewport {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
 QScrollBar::handle:vertical {{
     background: {theme.scrollbar};

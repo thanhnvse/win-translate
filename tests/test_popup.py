@@ -192,6 +192,61 @@ class TestPopupAppearance:
 
 
 
+class TestGradientThemes:
+    """A gradient colour and selectable text cannot coexist in a QLabel:
+    TextSelectableByMouse renders through a QTextDocument, whose character
+    format takes a solid colour, so the gradient is silently dropped."""
+
+    def test_a_gradient_theme_turns_selection_off_to_keep_its_colour(self, popup):
+        from PySide6.QtCore import Qt
+
+        for key in ("colorful", "neon"):
+            popup.apply_appearance(WIDTH, MAX_HEIGHT, key)
+            assert popup._translation.textInteractionFlags() == Qt.NoTextInteraction, key
+
+    def test_a_plain_theme_keeps_its_selectable_text(self, popup):
+        from PySide6.QtCore import Qt
+
+        for key in ("light", "dark"):
+            popup.apply_appearance(WIDTH, MAX_HEIGHT, key)
+            assert popup._translation.textInteractionFlags() == Qt.TextSelectableByMouse, key
+
+    def test_the_gradient_actually_reaches_the_glyphs(self, popup, qapp):
+        """The bug this guards shipped once: the stylesheet carried a gradient,
+        every structural check passed, and the text still rendered flat black.
+
+        Compared image against image rather than by sampling colours. Several
+        hand-written pixel metrics were tried here first and each one called a
+        working render broken -- hue counting cannot tell a gradient from the
+        unstable hues of anti-aliased near-black text. Two renders that differ
+        only by whether selection is on cannot both be flat black.
+        """
+        from PySide6.QtCore import Qt
+
+        popup.apply_appearance(WIDTH, MAX_HEIGHT, "neon")
+        popup.show_result("src", "the connection pool was exhausted", "vi", target="en")
+        qapp.processEvents()
+        with_gradient = popup._translation.grab().toImage()
+
+        # Selection forces rendering through a QTextDocument, which drops the
+        # gradient; this is what the broken version looked like.
+        popup._translation.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        qapp.processEvents()
+        without = popup._translation.grab().toImage()
+
+        assert with_gradient != without, (
+            "the gradient theme renders the same as the solid fallback, "
+            "so the gradient is not reaching the text"
+        )
+
+    def test_copy_still_takes_the_whole_translation(self, popup, qapp):
+        """Selection is what was given up, not copying."""
+        popup.apply_appearance(WIDTH, MAX_HEIGHT, "colorful")
+        popup.show_result("src", "Xin chào", "en")
+        popup._copy_translation()
+        assert qapp.clipboard().text() == "Xin chào"
+
+
 class TestClosing:
     def test_escape_hides_the_popup(self, popup, qapp):
         from PySide6.QtCore import QEvent, Qt

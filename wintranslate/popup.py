@@ -87,7 +87,8 @@ class TranslationPopup(QWidget):
         self._translation = QLabel(
             objectName="translation", wordWrap=True, textFormat=Qt.PlainText
         )
-        self._translation.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Interaction is set per theme in _apply_theme: a gradient colour and
+        # selectable text cannot coexist. See the note there.
         self._translation.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         self._scroll = QScrollArea()
@@ -135,6 +136,17 @@ class TranslationPopup(QWidget):
 
     def _apply_theme(self) -> None:
         self.setStyleSheet(theming.popup_stylesheet(self._theme))
+        # Selectable text and gradient text are mutually exclusive in QLabel.
+        # TextSelectableByMouse switches rendering to a QTextDocument, whose
+        # character format takes a solid colour, so the gradient is dropped and
+        # the text falls back to black -- measured, not inferred. The themes
+        # that ask for a gradient give up selection for it; Copy still takes
+        # the whole translation, so only picking out part of it is lost.
+        self._translation.setTextInteractionFlags(
+            Qt.NoTextInteraction
+            if self._theme.text_stops
+            else Qt.TextSelectableByMouse
+        )
         self.update()
 
     def paintEvent(self, event) -> None:

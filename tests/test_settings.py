@@ -68,8 +68,10 @@ class TestLanguages:
 
 
 class TestThemes:
-    def test_all_three_are_offered(self):
-        assert [option.key for option in theme.THEMES] == ["light", "dark", "colorful"]
+    def test_every_theme_is_offered_in_order(self):
+        assert [option.key for option in theme.THEMES] == [
+            "light", "dark", "colorful", "neon",
+        ]
 
     def test_an_unknown_key_falls_back_instead_of_raising(self):
         assert theme.get("chartreuse") is theme.DEFAULT
@@ -88,10 +90,27 @@ class TestThemes:
             assert theme.popup_stylesheet(option)
             assert theme.settings_stylesheet(option)
 
-    def test_the_scroll_viewport_rule_survives_in_every_theme(self):
-        """The rule that keeps the translation off a white block."""
+    def test_the_scroll_viewport_is_made_transparent_in_every_theme(self):
+        """The rule that keeps the translation off a white block.
+
+        Checked by what it targets, not by its exact text: the selector was
+        narrowed once already, and a test that pins the wording would have to
+        change again for a fix that is none of its business.
+        """
         for option in theme.THEMES:
-            assert "QScrollArea > QWidget > QWidget" in theme.popup_stylesheet(option)
+            sheet = theme.popup_stylesheet(option)
+            assert "qt_scrollarea_viewport" in sheet, option.key
+            rule = sheet.split("qt_scrollarea_viewport")[1].split("}")[0]
+            assert "background: transparent" in rule, option.key
+
+    def test_the_viewport_rule_does_not_reach_the_label_inside_it(self):
+        """`QScrollArea > QWidget > QWidget` also matched the translation, and
+        a background rule on a widget collapses a gradient colour to its last
+        stop -- measured, the four-stop text went flat #12715a."""
+        for option in theme.THEMES:
+            assert (
+                "QScrollArea > QWidget > QWidget" not in theme.popup_stylesheet(option)
+            ), option.key
 
     def test_the_stylesheet_url_survives_a_path_with_spaces(self):
         """Unquoted, the rule is dropped at the first space and the control
@@ -120,15 +139,50 @@ class TestThemes:
                     theme.ASSETS / f"chevron-{direction}-{option.chevron}.svg"
                 ).is_file()
 
-    def test_every_theme_separates_its_text_from_its_primary_button(self):
-        """The card is a gradient now, so contrast against it is checked by the
-        pixel tests; what is checkable here is that no token collides."""
+    def test_the_primary_label_reads_on_every_stop_of_its_button(self):
+        """A gradient button is only as readable as its worst stop, so the
+        label is measured against each one rather than against an average."""
         from PySide6.QtGui import QColor
 
         for option in theme.THEMES:
-            button = QColor(option.primary_bg).lightness()
+            fill = option.primary_stops or ((0.0, option.accent),)
             label = QColor(option.primary_fg).lightness()
-            assert abs(button - label) > 80, option.key
+            for _, colour in fill:
+                gap = abs(QColor(colour).lightness() - label)
+                assert gap > 70, f"{option.key}: {option.primary_fg} on {colour} ({gap})"
+
+    def test_every_text_stop_reads_on_every_card_stop(self):
+        """Gradient text over a gradient card has a trap of its own: a colour
+        that reads at one end of the pane can vanish at the other. Checked
+        against the declared stops, not sampled pixels."""
+        from PySide6.QtGui import QColor
+
+        for option in theme.THEMES:
+            text = option.text_stops or ((0.0, option.title),)
+            worst = min(
+                (
+                    abs(QColor(t).lightness() - QColor(c).lightness()), t, c)
+                for _, t in text
+                for _, c in option.card_stops
+            )
+            gap, text_colour, card_colour = worst
+            assert gap > 60, (
+                f"{option.key}: {text_colour} on {card_colour} differs by only {gap}"
+            )
+
+    def test_a_gradient_theme_renders_its_translation_as_a_gradient(self):
+        for option in (theme.COLORFUL, theme.NEON):
+            assert "qlineargradient" in option.translation_colour, option.key
+        for option in (theme.LIGHT, theme.DARK):
+            assert option.translation_colour == option.title, option.key
+
+    def test_the_error_and_waiting_states_stay_one_colour(self):
+        """They must not inherit the gradient, or they stop reading as
+        anything other than a translation."""
+        for option in theme.THEMES:
+            sheet = theme.popup_stylesheet(option)
+            error = sheet.split('#translation[state="error"]')[1].split("}")[0]
+            assert "qlineargradient" not in error, option.key
 
 
 class TestHotkeyCapture:
