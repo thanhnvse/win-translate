@@ -304,7 +304,11 @@ class TestSettingsDialog:
         from wintranslate.config import Config
         from wintranslate.settings import SettingsDialog
 
-        widget = SettingsDialog(Config(), lambda config: "that hotkey is taken")
+        # Stated rather than left to Config(): the default differs per platform
+        # (ctrl+t on macOS), and this test is about the old value surviving.
+        widget = SettingsDialog(
+            Config(hotkey="ctrl+alt+t"), lambda config: "that hotkey is taken"
+        )
         widget._on_hotkey("ctrl+alt+j")
         assert widget.config().hotkey == "ctrl+alt+t", "the old setting must survive"
         assert "taken" in widget._status.text()
