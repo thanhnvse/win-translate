@@ -61,7 +61,17 @@ class TranslationPopup(QWidget):
         self._theme = theming.get(theme)
         self._pending = False
 
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        # No system shadow: paintEvent draws the card's own, in the transparent
+        # margin around it. The system one is traced from everything that is
+        # not fully transparent, that hand-drawn shadow included, so it outlines
+        # the whole margin in a dark ring -- the macOS window shadow did, on
+        # every theme.
+        self.setWindowFlags(
+            Qt.FramelessWindowHint
+            | Qt.Tool
+            | Qt.WindowStaysOnTopHint
+            | Qt.NoDropShadowWindowHint
+        )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedWidth(width)
 

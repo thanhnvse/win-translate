@@ -334,3 +334,20 @@ class TestDismissal:
         popup.show_result("source", "text", "en")
         qapp.sendEvent(popup, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
         assert not popup.isVisible()
+
+
+class TestWindowShadow:
+    def test_asks_the_system_for_no_shadow_of_its_own(self, popup):
+        # The card draws its own shadow in a transparent margin. A system
+        # shadow is traced from every pixel that is not fully transparent, so
+        # it outlined that whole margin in a dark ring on macOS, on every theme.
+        from PySide6.QtCore import Qt
+
+        assert popup.windowFlags() & Qt.NoDropShadowWindowHint
+        assert popup.testAttribute(Qt.WA_TranslucentBackground)
+
+    def test_keeps_the_shadow_hint_after_a_theme_change(self, popup):
+        from PySide6.QtCore import Qt
+
+        popup.apply_appearance(WIDTH, MAX_HEIGHT, "neon")
+        assert popup.windowFlags() & Qt.NoDropShadowWindowHint

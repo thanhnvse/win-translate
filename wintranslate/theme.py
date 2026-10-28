@@ -244,6 +244,11 @@ QComboBox, QAbstractSpinBox, #hotkey {{
 QComboBox:focus, QAbstractSpinBox:focus, #hotkey:focus {{
     border: 1px solid {theme.accent};
 }}
+/* A plain drop-down list rather than the macOS menu-style popup. That one is
+   painted as a native menu panel in the system appearance -- near black in Dark
+   Mode -- so black bands and corners showed around the light list, and its
+   scroll arrows sat on black strips. Windows already shows this kind. */
+QComboBox {{ combobox-popup: 0; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox::down-arrow {{
     image: url({_chevron(theme, "down")});
