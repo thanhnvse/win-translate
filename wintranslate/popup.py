@@ -1,16 +1,23 @@
 """The floating result window.
 
-It deliberately behaves like a tooltip rather than a normal window: no taskbar
-entry, no title bar, always on top, and it closes as soon as it loses focus.
-The user asked for a translation, not for another window to manage.
+It behaves like a tooltip rather than a window: no taskbar entry, no title bar,
+always on top, gone as soon as it loses focus. The user asked for a
+translation, not for something else to manage.
+
+Shape follows the macOS alert it was drawn from -- a frosted pane with a large
+radius, a soft wide shadow instead of a hard border, the translation as the one
+bold line, and two equal buttons at the foot.
+
+The height logic here broke three times while it was first written: layouts
+cache their size hints, a fixed height clamps the measurement taken for the
+next translation, and the scroll area's viewport paints white unless told not
+to. Each of those has a test; none of it is incidental.
 """
 
 from __future__ import annotations
 
-import sys
-
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtGui import QCursor, QGuiApplication, QKeyEvent
+from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -22,167 +29,162 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-#: Gap between the mouse pointer and the popup's corner, so the pointer never
-#: covers the first line of text.
+from . import theme as theming
+
+#: Gap between the pointer and the card, so the pointer never covers the text.
 _CURSOR_OFFSET = QPoint(14, 18)
 
-#: Keep the popup this far from the screen edge when clamping.
+#: Keep this far from the screen edge when clamping.
 _SCREEN_MARGIN = 8
-
-#: Left/right padding inside the card.
-_CARD_PADDING = 14
 
 #: Reserved so a long translation's scrollbar never overlaps the text.
 _SCROLLBAR_GUTTER = 12
 
-#: Even a one-word translation gets this much room, so the popup never collapses
-#: to a sliver while the layout is settling.
+#: Even one word gets this much room, so the card never collapses to a sliver.
 _MIN_TEXT_HEIGHT = 22
 
-#: Qt's own "no maximum" sentinel, used to lift a previously fixed height.
+#: Roughly three lines, held open while the translation is in flight.
+_PENDING_TEXT_HEIGHT = 46
+
+#: Qt's own "no maximum", used to lift a previously fixed height.
 _QWIDGETSIZE_MAX = 16777215
 
-#: Footer hint. Shown whenever the popup is not briefly confirming a copy.
-_HINT_TEXT = "Esc to close"
-
-_STYLESHEET = """
-#card {
-    background-color: #1e1f24;
-    border: 1px solid #34363d;
-    border-radius: 10px;
-}
-#heading {
-    color: #8b8d96;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.4px;
-}
-#source {
-    color: #7e808a;
-    font-size: 12px;
-}
-#translation {
-    color: #f2f3f5;
-    font-size: 14px;
-}
-#translation[state="error"] {
-    color: #ff8a80;
-}
-#translation[state="pending"] {
-    color: #8b8d96;
-    font-style: italic;
-}
-#hint {
-    color: #62646d;
-    font-size: 10px;
-}
-QPushButton {
-    background-color: #2b2d34;
-    color: #d8dae0;
-    border: 1px solid #3a3d45;
-    border-radius: 5px;
-    padding: 3px 10px;
-    font-size: 11px;
-}
-QPushButton:hover { background-color: #343740; }
-QPushButton:pressed { background-color: #26282e; }
-#close {
-    background: transparent;
-    border: none;
-    color: #8b8d96;
-    font-size: 15px;
-    padding: 0 4px;
-}
-#close:hover { color: #f2f3f5; }
-/* The scroll area's *viewport* is a separate widget with its own palette, and
-   it defaults to QPalette.Base -- white. Without these three selectors the
-   translation is near-white text drawn on a white block. */
-QScrollArea,
-QScrollArea > QWidget,
-QScrollArea > QWidget > QWidget { background: transparent; border: none; }
-QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
-QScrollBar::handle:vertical { background: #43454d; border-radius: 4px; min-height: 24px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-"""
+_LANGUAGE_LABELS = {"vi": "VIETNAMESE", "en": "ENGLISH"}
 
 
 class TranslationPopup(QWidget):
-    def __init__(self, width: int = 460, max_height: int = 420) -> None:
+    def __init__(
+        self, width: int = 460, max_height: int = 420, theme: str = "light"
+    ) -> None:
         super().__init__()
         self._max_height = max_height
-        # Width available to wrapped text: the popup minus the card's left and
-        # right padding, minus a gutter for the scrollbar. Both labels are pinned
-        # to it so `heightForWidth` has a width to answer for.
-        self._content_width = width - _CARD_PADDING * 2 - _SCROLLBAR_GUTTER
+        self._theme = theming.get(theme)
+        self._pending = False
 
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint
-        )
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedWidth(width)
-        self.setStyleSheet(_STYLESHEET)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        # The shadow is drawn outside the card, so the layout has to leave it room.
+        margin = theming.SHADOW_MARGIN
+        outer.setContentsMargins(margin, margin - 6, margin, margin)
 
-        card = QFrame(objectName="card")
-        outer.addWidget(card)
-        self._card = card
+        self._card = QFrame(objectName="card")
+        outer.addWidget(self._card)
 
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(_CARD_PADDING, 12, _CARD_PADDING, 10)
-        layout.setSpacing(8)
+        body = QVBoxLayout(self._card)
+        pad = theming.CARD_PADDING
+        body.setContentsMargins(pad, pad - 6, pad, pad - 6)
+        body.setSpacing(0)
 
-        heading_row = QHBoxLayout()
-        heading_row.setSpacing(6)
         self._heading = QLabel(objectName="heading")
-        heading_row.addWidget(self._heading)
-        heading_row.addStretch(1)
-        close_button = QPushButton("✕", objectName="close")
-        close_button.setCursor(Qt.PointingHandCursor)
-        close_button.setFixedSize(20, 18)
-        close_button.clicked.connect(self.hide)
-        heading_row.addWidget(close_button)
-        layout.addLayout(heading_row)
+        body.addWidget(self._heading)
+        body.addSpacing(10)
 
         # PlainText, not the default AutoText: a selection such as "<b>x</b>"
         # must be shown as written, not rendered as markup.
-        self._source = QLabel(objectName="source", wordWrap=True, textFormat=Qt.PlainText)
-        self._source.setFixedWidth(self._content_width)
-        layout.addWidget(self._source)
-
         self._translation = QLabel(
             objectName="translation", wordWrap=True, textFormat=Qt.PlainText
         )
         self._translation.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._translation.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+
+        self._scroll = QScrollArea()
+        # Deliberately not widgetResizable: the label owns a fixed width so that
+        # heightForWidth() has something definite to answer, which is what the
+        # card's height is derived from.
+        self._scroll.setWidgetResizable(False)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setWidget(self._translation)
+        self._scroll.viewport().setAutoFillBackground(False)
+        self._translation.setAutoFillBackground(False)
+
+        # Source first, then the translation under it: the eye starts at what
+        # was selected and moves down to what came back.
+        self._source = QLabel(
+            objectName="source", wordWrap=True, textFormat=Qt.PlainText
+        )
+        body.addWidget(self._source)
+        body.addSpacing(8)
+        body.addWidget(self._scroll)
+
+        body.addSpacing(14)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        self._close_button = QPushButton("Close", objectName="secondary")
+        self._close_button.clicked.connect(self.hide)
+        self._copy_button = QPushButton("Copy", objectName="primary")
+        self._copy_button.clicked.connect(self._copy_translation)
+        buttons.addWidget(self._close_button, 1)
+        buttons.addWidget(self._copy_button, 1)
+        body.addLayout(buttons)
+
+        self._apply_width(width)
+        self._apply_theme()
+
+    # -- appearance ---------------------------------------------------------
+
+    def _apply_width(self, width: int) -> None:
+        card = width - theming.SHADOW_MARGIN * 2
+        self._content_width = card - theming.CARD_PADDING * 2 - _SCROLLBAR_GUTTER
+        self.setFixedWidth(width)
+        self._source.setFixedWidth(self._content_width)
         self._translation.setFixedWidth(self._content_width)
 
-        scroll = QScrollArea()
-        # Deliberately NOT widgetResizable: the label owns a fixed width so that
-        # heightForWidth() has something definite to answer, which is what the
-        # popup's own height is derived from.
-        scroll.setWidgetResizable(False)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(self._translation)
-        scroll.viewport().setAutoFillBackground(False)
-        self._translation.setAutoFillBackground(False)
-        self._scroll = scroll
-        layout.addWidget(scroll)
+    def _apply_theme(self) -> None:
+        self.setStyleSheet(theming.popup_stylesheet(self._theme))
+        self.update()
 
-        footer = QHBoxLayout()
-        footer.setSpacing(6)
-        self._hint = QLabel(_HINT_TEXT, objectName="hint")
-        footer.addWidget(self._hint)
-        footer.addStretch(1)
-        self._copy_button = QPushButton("Copy")
-        self._copy_button.clicked.connect(self._copy_translation)
-        footer.addWidget(self._copy_button)
-        layout.addLayout(footer)
+    def paintEvent(self, event) -> None:
+        """Draw the card's shadow by hand.
+
+        QGraphicsDropShadowEffect renders the widget and everything under it
+        into a pixmap first, which softens every glyph: measured on this
+        popup, the largest edge step across a line of text fell from 255 to 79.
+        Stacked translucent rounded rectangles cost nothing and leave the text
+        drawn by the normal path.
+        """
+        card = QRectF(self._card.geometry())
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        layers = 12
+        for step in range(layers, 0, -1):
+            spread = step * 1.7
+            colour = QColor(self._theme.shadow)
+            colour.setAlpha(max(2, self._theme.shadow_alpha // (layers * 2)))
+            painter.setBrush(colour)
+            painter.drawRoundedRect(
+                card.adjusted(-spread, -spread + 5, spread, spread + 7),
+                theming.RADIUS + spread * 0.4,
+                theming.RADIUS + spread * 0.4,
+            )
+        super().paintEvent(event)
+
+    def apply_appearance(self, width: int, max_height: int, theme: str) -> None:
+        """Re-dress the popup in place, for a settings change.
+
+        Rebuilding it instead would drop whatever is on screen and break the
+        signal connections the app holds to this object.
+        """
+        self._max_height = max_height
+        self._theme = theming.get(theme)
+        self._apply_width(width)
+        self._apply_theme()
+        # Property selectors are re-read only on a re-polish, so a state set
+        # under the old stylesheet would keep the old colour.
+        for widget in (self, self._card, self._translation):
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+        if self.isVisible():
+            self._fit_height()
+
+    # -- states -------------------------------------------------------------
 
     def show_pending(self, source_text: str) -> None:
+        self._pending = True
         self._heading.setText("TRANSLATING…")
         self._source.setText(_preview(source_text))
         self._set_translation("…", state="pending")
@@ -200,6 +202,7 @@ class TranslationPopup(QWidget):
         heading = _language_label(target)
         if show_detected and detected_source:
             heading = f"{_language_label(detected_source)} → {heading}"
+        self._pending = False
         self._heading.setText(heading)
         self._source.setText(_preview(source_text))
         self._set_translation(translated, state="ok")
@@ -207,6 +210,7 @@ class TranslationPopup(QWidget):
         self._present()
 
     def show_error(self, message: str) -> None:
+        self._pending = False
         self._heading.setText("TRANSLATION FAILED")
         self._source.setText("")
         self._set_translation(message, state="error")
@@ -215,10 +219,11 @@ class TranslationPopup(QWidget):
 
     def _set_translation(self, text: str, state: str) -> None:
         self._translation.setText(text)
-        # Re-polish so the [state="..."] selectors in the stylesheet re-apply.
         self._translation.setProperty("state", state)
         self._translation.style().unpolish(self._translation)
         self._translation.style().polish(self._translation)
+
+    # -- geometry -----------------------------------------------------------
 
     def _present(self) -> None:
         self._fit_height()
@@ -229,18 +234,14 @@ class TranslationPopup(QWidget):
         self.activateWindow()
 
     def _fit_height(self) -> None:
-        """Grow with the content, up to the configured ceiling, then scroll.
+        """Grow with the content up to the ceiling, then scroll.
 
-        The space taken by the heading, source line and footer is *measured*
-        rather than assumed: the source preview wraps to one or two lines
-        depending on the selection, so a hard-coded figure would either clip the
-        translation or leave a gap under it.
+        The chrome around the text is measured rather than assumed, because the
+        source preview wraps to one or two lines depending on the selection.
         """
-        # Release every height pinned by the previous translation first. While a
-        # fixed height is in force it clamps that widget's own measurements, so
-        # heightForWidth() would keep reporting the old text's height and the
-        # popup could only ever grow -- a short translation after a long one
-        # would inherit the tall window.
+        # Release the height pinned by the previous translation. While a fixed
+        # height is in force it clamps that widget's own measurements, so
+        # heightForWidth would keep reporting the old text's height.
         for widget in (self, self._translation):
             widget.setMinimumHeight(0)
             widget.setMaximumHeight(_QWIDGETSIZE_MAX)
@@ -248,18 +249,20 @@ class TranslationPopup(QWidget):
         text_height = self._translation.heightForWidth(self._content_width)
         if text_height <= 0:
             text_height = self._translation.sizeHint().height()
+        if self._pending:
+            # While waiting there is only an ellipsis to measure. Opening at
+            # that size and jumping once the answer lands reads as a glitch, so
+            # the card reserves roughly what an answer takes.
+            text_height = max(text_height, _PENDING_TEXT_HEIGHT)
         self._translation.setFixedHeight(text_height)
 
-        # Collapse the scroll area, let the layout settle, and read off what
-        # everything else costs.
         self._scroll.setFixedHeight(1)
         self._relayout()
         chrome = self.sizeHint().height() - 1
 
         budget = max(_MIN_TEXT_HEIGHT, self._max_height - chrome)
-        # Decide on the scrollbar from the numbers rather than leaving it to
-        # "as needed", which shows a bar for a sub-pixel overflow on text that
-        # visibly fits.
+        # Decide the scrollbar from the numbers: "as needed" shows a bar for a
+        # sub-pixel overflow on text that visibly fits.
         self._scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarAsNeeded if text_height > budget else Qt.ScrollBarAlwaysOff
         )
@@ -270,20 +273,20 @@ class TranslationPopup(QWidget):
     def _relayout(self) -> None:
         """Force both layouts to recompute.
 
-        ``activate()`` alone is not enough: Qt caches each layout's size hint and
-        only ``invalidate()`` marks it dirty, so without this the popup keeps
+        activate() alone is not enough: Qt caches each layout's size hint and
+        only invalidate() marks it dirty, so without this the popup keeps
         reporting the height it had for the previous translation.
         """
         for layout in (self._card.layout(), self.layout()):
             layout.invalidate()
             layout.activate()
 
+    # -- behaviour ----------------------------------------------------------
+
     def _copy_translation(self) -> None:
         QApplication.clipboard().setText(self._translation.text())
-        self._hint.setText("Copied")
-        # Put the keyboard hint back, otherwise the only reminder that Esc closes
-        # the popup disappears for good after the first copy.
-        QTimer.singleShot(1500, lambda: self._hint.setText(_HINT_TEXT))
+        self._copy_button.setText("Copied")
+        QTimer.singleShot(1500, lambda: self._copy_button.setText("Copy"))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Escape:
@@ -312,17 +315,8 @@ class TranslationPopup(QWidget):
         super().changeEvent(event)
 
     def hideEvent(self, event) -> None:
-        self._hint.setText(_HINT_TEXT)
-        if sys.platform == "darwin" and QGuiApplication.platformName() == "cocoa":
-            from .macos import yield_activation
-
-            yield_activation()
+        self._copy_button.setText("Copy")
         super().hideEvent(event)
-
-
-#: Only the two languages this app switches between get a name; anything else
-#: shows its ISO code, which is clearer than a wrong guess at the endonym.
-_LANGUAGE_LABELS = {"vi": "VIETNAMESE", "en": "ENGLISH"}
 
 
 def _language_label(code: str) -> str:
@@ -349,7 +343,7 @@ def _position_near_cursor(width: int, height: int) -> QPoint:
     x = cursor.x() + _CURSOR_OFFSET.x()
     y = cursor.y() + _CURSOR_OFFSET.y()
 
-    # Flip to the other side of the pointer rather than sliding, so the popup
+    # Flip to the other side of the pointer rather than sliding, so the card
     # never lands under the cursor.
     if x + width > area.right() - _SCREEN_MARGIN:
         x = cursor.x() - width - _CURSOR_OFFSET.x()

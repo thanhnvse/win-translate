@@ -129,45 +129,67 @@ class TestPopupAppearance:
 
     The sizing tests all passed while the translation was invisible: near-white
     text on the scroll area's default white viewport. Geometry being right says
-    nothing about the thing being readable, so these sample actual pixels.
+    nothing about the thing being readable, so these sample actual pixels -- and
+    they run for every theme, because a light theme is exactly where a palette
+    inherited from a dark one goes wrong.
     """
 
     def _background_lightness(self, popup) -> float:
         """Median lightness over the translation area.
 
-        The median rather than the maximum, because the translation text is
-        deliberately near-white: sampling a band that crosses glyphs will always
-        find light pixels. Background dominates the area, so a white viewport
-        moves the median while ordinary text does not.
+        The median rather than the extreme, because the translation text is one
+        colour and the card another: sampling a band that crosses glyphs always
+        finds both. Background dominates the area, so the median tracks the card.
         """
         image = popup.grab().toImage()
         rect = popup._scroll.geometry()
         top = popup._scroll.mapTo(popup, rect.topLeft()).y()
+        left = popup._scroll.mapTo(popup, rect.topLeft()).x()
         values = [
             image.pixelColor(x, y).lightness()
-            # Inset so the card border and the scrollbar gutter stay out of it.
-            for x in range(20, popup.width() - 30, 3)
+            for x in range(left + 2, left + rect.width() - 10, 3)
             for y in range(top + 2, top + rect.height() - 2, 3)
         ]
         assert values, "expected to sample some pixels"
         return statistics.median(values)
 
-    def test_translation_sits_on_the_dark_card_not_a_white_block(self, popup):
-        popup.show_result("buffer", "đệm", "en")
-        # The card is #1e1f24 (lightness ~33). The regression this guards against
-        # painted QPalette.Base white behind the text.
-        assert self._background_lightness(popup) < 120
+    @pytest.mark.parametrize("key", ["light", "dark", "colorful"])
+    def test_the_translation_contrasts_with_its_card_in_every_theme(self, popup, key):
+        from PySide6.QtGui import QColor
 
-    def test_the_same_holds_for_a_long_translation(self, popup):
+        from wintranslate import theme as theming
+
+        popup.apply_appearance(WIDTH, MAX_HEIGHT, key)
+        popup.show_result("buffer", "dem", "en")
+        background = self._background_lightness(popup)
+        text = QColor(theming.get(key).title).lightness()
+        assert abs(text - background) > 60, (
+            f"{key}: text lightness {text} against a card measured at {background}"
+        )
+
+    @pytest.mark.parametrize("key", ["light", "dark", "colorful"])
+    def test_the_same_holds_for_a_long_translation(self, popup, key):
+        from PySide6.QtGui import QColor
+
+        from wintranslate import theme as theming
+
+        popup.apply_appearance(WIDTH, MAX_HEIGHT, key)
         popup.show_result("src", "Dong rat dai. " * 200, "en")
-        assert self._background_lightness(popup) < 120
+        text = QColor(theming.get(key).title).lightness()
+        assert abs(text - self._background_lightness(popup)) > 60
 
-    def test_the_same_holds_for_the_error_state(self, popup):
-        popup.show_error("Nothing was selected.")
-        assert self._background_lightness(popup) < 120
+    def test_the_error_state_is_not_the_card_colour(self, popup):
+        from PySide6.QtGui import QColor
+
+        from wintranslate import theme as theming
+
+        popup.show_error("Google Translate returned HTTP 429.")
+        error = QColor(theming.get("light").error).lightness()
+        assert abs(error - self._background_lightness(popup)) > 40
 
     def test_scroll_viewport_does_not_fill_its_background(self, popup):
         assert not popup._scroll.viewport().autoFillBackground()
+
 
 
 class TestClosing:
@@ -185,27 +207,26 @@ class TestClosing:
     def test_there_is_a_close_button_that_hides_the_popup(self, popup):
         from PySide6.QtWidgets import QPushButton
 
-        close = popup.findChild(QPushButton, "close")
+        close = popup.findChild(QPushButton, "secondary")
         assert close is not None, "the popup needs a visible way to dismiss it"
         popup.show_result("Hello", "Xin chào", "en")
         assert popup.isVisible()
         close.click()
         assert not popup.isVisible()
 
-    def test_hint_returns_after_a_copy(self, popup, qapp):
+    def test_the_copy_button_confirms_and_then_resets(self, popup, qapp):
+        """The button is the only feedback now that the hint line is gone."""
         from PySide6.QtCore import QTimer
-        from wintranslate.popup import _HINT_TEXT
 
-        popup.show_result("Hello", "Xin chào", "en")
+        popup.show_result("Hello", "Xin chao", "en")
         popup._copy_translation()
-        assert popup._hint.text() != _HINT_TEXT
+        assert popup._copy_button.text() == "Copied"
 
-        # Let the revert timer fire.
-        loop_done = []
-        QTimer.singleShot(1800, lambda: loop_done.append(True))
-        while not loop_done:
+        done = []
+        QTimer.singleShot(1800, lambda: done.append(True))
+        while not done:
             qapp.processEvents()
-        assert popup._hint.text() == _HINT_TEXT
+        assert popup._copy_button.text() == "Copy"
 
 
 class TestPreview:

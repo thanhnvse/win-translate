@@ -118,3 +118,114 @@ class TestLogging:
                 if handler not in before:
                     handler.close()
                     root.removeHandler(handler)
+
+
+class _FakeListener:
+    """Stands in for HotkeyListener so tests never grab a real global hotkey."""
+
+    registered: list[str] = []
+    refuse: set[str] = set()
+
+    def __init__(self, spec, callback):
+        self.spec, self._callback, self.running = spec, callback, False
+
+    def start(self):
+        from wintranslate.hotkey import HotkeyError
+
+        if self.spec in self.refuse:
+            raise HotkeyError(f"Could not register hotkey {self.spec!r}.")
+        self.running = True
+        _FakeListener.registered.append(self.spec)
+
+    def stop(self):
+        self.running = False
+
+
+@pytest.fixture
+def fake_hotkeys(monkeypatch):
+    from wintranslate import app as app_module
+
+    _FakeListener.registered = []
+    _FakeListener.refuse = set()
+    monkeypatch.setattr(app_module, "HotkeyListener", _FakeListener)
+    return _FakeListener
+
+
+class TestApplyConfig:
+    """Settings apply live; the app has no restart step to fall back on."""
+
+    def test_a_new_target_language_reaches_the_translator(self, translate_app, tmp_path, monkeypatch):
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        monkeypatch.setattr(config_module, "config_path", lambda: tmp_path / "c.json")
+        assert translate_app.apply_config(
+            replace(translate_app._config, target_language="ja")
+        ) is None
+        assert translate_app._translator.target_language == "ja"
+
+    def test_a_new_theme_restyles_the_popup_without_rebuilding_it(self, translate_app, tmp_path, monkeypatch):
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        monkeypatch.setattr(config_module, "config_path", lambda: tmp_path / "c.json")
+        popup = translate_app._popup
+        translate_app.apply_config(replace(translate_app._config, theme="light"))
+        assert translate_app._popup is popup, "the popup object must survive"
+        assert popup._theme.key == "light"
+
+    def test_a_new_size_reaches_the_popup(self, translate_app, tmp_path, monkeypatch):
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        monkeypatch.setattr(config_module, "config_path", lambda: tmp_path / "c.json")
+        translate_app.apply_config(replace(translate_app._config, popup_width=520))
+        assert translate_app._popup.width() == 520
+
+    def test_the_change_is_written_so_it_survives_a_restart(self, translate_app, tmp_path, monkeypatch):
+        import json
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        path = tmp_path / "c.json"
+        monkeypatch.setattr(config_module, "config_path", lambda: path)
+        translate_app.apply_config(replace(translate_app._config, target_language="de"))
+        assert json.loads(path.read_text(encoding="utf-8"))["target_language"] == "de"
+
+
+class TestHotkeySwap:
+    def test_a_new_hotkey_replaces_the_old_registration(self, translate_app, fake_hotkeys, tmp_path, monkeypatch):
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        monkeypatch.setattr(config_module, "config_path", lambda: tmp_path / "c.json")
+        assert translate_app.apply_config(
+            replace(translate_app._config, hotkey="ctrl+alt+j")
+        ) is None
+        assert translate_app._hotkey.spec == "ctrl+alt+j"
+        assert translate_app._hotkey.running
+
+    def test_a_hotkey_another_program_owns_leaves_the_old_one_working(self, translate_app, fake_hotkeys, tmp_path, monkeypatch):
+        """Refusing must not cost the user the hotkey they already had."""
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        monkeypatch.setattr(config_module, "config_path", lambda: tmp_path / "c.json")
+        fake_hotkeys.refuse = {"ctrl+alt+j"}
+        before = translate_app._config
+        message = translate_app.apply_config(replace(before, hotkey="ctrl+alt+j"))
+        assert message and "ctrl+alt+j" in message
+        assert translate_app._hotkey.spec == before.hotkey
+        assert translate_app._hotkey.running
+        assert translate_app._config is before, "nothing else may change either"
+
+    def test_a_refused_hotkey_does_not_apply_the_rest_of_the_change(self, translate_app, fake_hotkeys, tmp_path, monkeypatch):
+        from dataclasses import replace
+        from wintranslate import config as config_module
+
+        monkeypatch.setattr(config_module, "config_path", lambda: tmp_path / "c.json")
+        fake_hotkeys.refuse = {"ctrl+alt+j"}
+        translate_app.apply_config(
+            replace(translate_app._config, hotkey="ctrl+alt+j", target_language="ja")
+        )
+        assert translate_app._translator.target_language != "ja"

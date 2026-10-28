@@ -80,7 +80,9 @@ class TranslateApp:
             api_key=config.google_api_key,
         )
         self._popup = TranslationPopup(
-            width=config.popup_width, max_height=config.popup_max_height
+            width=config.popup_width,
+            max_height=config.popup_max_height,
+            theme=config.theme,
         )
 
         self._requests = count(1)
@@ -93,6 +95,7 @@ class TranslateApp:
         self._bridge.translated.connect(self._on_translated, Qt.QueuedConnection)
         self._bridge.failed.connect(self._on_failed, Qt.QueuedConnection)
 
+        self._settings: object | None = None
         self._tray = self._build_tray()
         self._hotkey = HotkeyListener(config.hotkey, self._on_hotkey)
 
@@ -128,13 +131,9 @@ class TranslateApp:
         tray.setToolTip(f"{APP_NAME} — {self._config.hotkey}")
 
         menu = QMenu()
-        translate_action = QAction(f"Translate selection ({self._config.hotkey})", menu)
-        translate_action.triggered.connect(self._on_hotkey)
-        menu.addAction(translate_action)
-
-        config_action = QAction("Open config file", menu)
-        config_action.triggered.connect(self._open_config)
-        menu.addAction(config_action)
+        settings_action = QAction("Settings…", menu)
+        settings_action.triggered.connect(self._open_settings)
+        menu.addAction(settings_action)
 
         menu.addSeparator()
         quit_action = QAction("Quit", menu)
@@ -143,6 +142,73 @@ class TranslateApp:
 
         tray.setContextMenu(menu)
         return tray
+
+    def _open_settings(self) -> None:
+        """Open the settings window, or raise the one already open."""
+        from .settings import SettingsDialog
+
+        if self._settings is not None:
+            self._settings.raise_()
+            self._settings.activateWindow()
+            return
+        dialog = SettingsDialog(self._config, self.apply_config)
+        dialog.setWindowIcon(_tray_icon())
+        self._settings = dialog
+        dialog.finished.connect(self._on_settings_closed)
+        dialog.show()
+
+    def _on_settings_closed(self) -> None:
+        self._settings = None
+
+    def apply_config(self, config: Config) -> str | None:
+        """Adopt ``config`` live, or return why it cannot be adopted.
+
+        The hotkey is the only part that can be refused, because another program
+        may already own the combination. It is swapped first and everything else
+        follows only once it holds, so a rejected hotkey leaves the app exactly
+        as it was rather than half-changed.
+        """
+        if config.hotkey != self._config.hotkey:
+            message = self._swap_hotkey(config.hotkey)
+            if message:
+                return message
+
+        self._config = config
+        self._translator = Translator(
+            target_language=config.target_language,
+            alternate_language=config.alternate_language,
+            api_key=config.google_api_key,
+        )
+        self._popup.apply_appearance(
+            config.popup_width, config.popup_max_height, config.theme
+        )
+        self._tray.setToolTip(f"{APP_NAME} — {config.hotkey}")
+        try:
+            config.save()
+        except OSError as exc:
+            # The setting is live either way; say that it will not survive a
+            # restart rather than pretending it was stored.
+            return f"Applied, but could not be saved: {exc}"
+        return None
+
+    def _swap_hotkey(self, spec: str) -> str | None:
+        previous = self._hotkey
+        previous.stop()
+        candidate = HotkeyListener(spec, self._on_hotkey)
+        try:
+            candidate.start()
+        except HotkeyError as exc:
+            restored = HotkeyListener(previous.spec, self._on_hotkey)
+            try:
+                restored.start()
+                self._hotkey = restored
+            except HotkeyError:
+                # Both are gone; say so plainly instead of leaving the user to
+                # discover that no hotkey works any more.
+                return f"{exc} The previous hotkey could not be restored either."
+            return str(exc)
+        self._hotkey = candidate
+        return None
 
     def _open_config(self) -> None:
         path = config_path()
@@ -341,6 +407,15 @@ def _configure_logging() -> None:
 def main() -> int:
     app = QApplication([])
     app.setApplicationName(APP_NAME)
+    # Windows groups taskbar entries by this id; without it the settings window
+    # is filed under the Python interpreter and shows its icon.
+    if not IS_MACOS:
+        import ctypes
+
+        ctypes.WinDLL("shell32").SetCurrentProcessExplicitAppUserModelID(
+            f"{APP_NAME}.tray"
+        )
+    app.setWindowIcon(_tray_icon())
     # The popup is an ordinary window as far as Qt is concerned; without this the
     # app would exit the first time the user dismisses it.
     app.setQuitOnLastWindowClosed(False)

@@ -316,6 +316,37 @@ capture tests (they need AppKit), on macOS `tests/test_hotkey.py` (12 Win32
 hotkey tests, reported as one skip — `92 passed, 1 skipped`). The macOS hotkey
 parser is tested on both.
 
+A third script renders the interface without needing a desktop session, and is
+the quickest way to see what the other platform looks like:
+
+```bash
+.venv.nosync/bin/python scripts/check_ui.py   # macOS
+```
+
+```bash
+.venv\Scripts\python.exe scripts\check_ui.py  # Windows
+```
+
+It writes `.pytest_cache/ui-<platform>/` and prints the system font, the
+popup's size before and after a translation, and any language still missing a
+flag.
+
+## Assets
+
+`assets/flags/` holds one SVG per language, named by the region in
+`wintranslate/languages.py`. They come from
+[flag-icons](https://github.com/lipis/flag-icons) (MIT); the licence and
+attribution are in `assets/flags/LICENSE`. `eo.svg` is not from that set --
+Esperanto belongs to no country and has a flag of its own, drawn here.
+
+Windows cannot render flag emoji: Segoe UI Emoji has no glyphs for regional
+indicator pairs, so a flag emoji draws as the two letters of its country code.
+That is why these are image files rather than text. macOS does render them, but
+one source for both platforms beats two code paths.
+
+`assets/ui/` holds the chevrons the spin boxes and drop-downs draw, in two
+weights so they read on a light or a dark control.
+
 These checks need a real desktop session and are not part of the suite:
 
 ```bash

@@ -37,6 +37,9 @@ class Config:
     google_api_key: str = ""
     popup_width: int = 460
     popup_max_height: int = 420
+    #: Popup colours. See wintranslate.theme for the keys; an unknown one falls
+    #: back to the default rather than refusing to start.
+    theme: str = "light"
     #: Show the language Google detected on the source text.
     show_detected_language: bool = True
 
