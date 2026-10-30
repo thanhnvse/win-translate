@@ -74,11 +74,17 @@ def compile_launcher(output: Path) -> None:
 
 
 def build_icon(output: Path, workdir: Path) -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # The real Cocoa platform, not offscreen: SF's glyph shapes depend on it,
+    # and under offscreen the W came out narrower than in the menu-bar icon,
+    # which the running app draws under Cocoa. Same platform, same icon.
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication, QPainter, QPixmap
 
+    from wintranslate import macos
+
     app = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841 - QPixmap needs it
+    # No Dock tile for the moment the build spends drawing.
+    macos.hide_dock_icon()
     from wintranslate.app import draw_icon
 
     iconset = workdir / "AppIcon.iconset"

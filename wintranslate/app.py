@@ -25,7 +25,17 @@ from itertools import count
 from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QFontDatabase,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QPixmap,
+)
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from .config import Config, ConfigError, config_path
@@ -58,8 +68,26 @@ _ERROR_ALREADY_EXISTS = 183
 #: Long enough for Qt's own launch-time activation to have landed first.
 _YIELD_AFTER_LAUNCH_MS = 500
 
-#: Letter drawn on the tray icon.
-_TRAY_LETTER = "W"
+#: Drawn on the icon: a big W with a small "tr" tucked under its right arm,
+#: the layout win-voice-over uses for its "vo". Sizes are fractions of the
+#: square's side; the overlap is a fraction of the W's own width.
+_ICON_LETTER = "W"
+_ICON_SUFFIX = "tr"
+_ICON_LETTER_SIZE = 0.62
+_ICON_SUFFIX_SIZE = 0.30
+_ICON_RAISE = 0.06
+#: win-voice-over's overlap. The "t" of "tr" rises higher than "vo" and would
+#: cut into the W's arm, so it is backed off until this much blue shows
+#: between them, in grid units: measured per font, because SF on macOS and
+#: Segoe UI on Windows draw a different W.
+_ICON_MAX_OVERLAP = 0.16
+_ICON_GAP = 1.5
+#: win-voice-over's blue (sRGB 37, 99, 235) and corner radius, as a fraction
+#: of the side, so the two apps' icons match.
+_ICON_BLUE = "#2563eb"
+_ICON_RADIUS = 0.22
+#: The icon is drawn on this grid, in units, then scaled to the size asked for.
+_ICON_GRID = 64
 
 
 class _Bridge(QObject):
@@ -309,29 +337,82 @@ def _tray_icon() -> QIcon:
 
 
 def draw_icon(size: int) -> QPixmap:
-    """The blue W, at any size. Also the source of the macOS app icon."""
+    """The blue W with a small "tr", at any size. Also the macOS app icon."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
-    # Drawn on a 64-unit grid and scaled, so every size has the same shape.
-    painter.scale(size / 64, size / 64)
-    painter.setBrush(QColor("#2f6feb"))
+    # Drawn on a fixed grid and scaled, so every size has the same shape. The
+    # square fills the whole of it, as win-voice-over's does; the app-icon
+    # build adds Apple's margin around it.
+    painter.scale(size / _ICON_GRID, size / _ICON_GRID)
     painter.setPen(Qt.NoPen)
-    painter.drawRoundedRect(2, 2, 60, 60, 14, 14)
+    painter.setBrush(QColor(_ICON_BLUE))
+    origin, side = 0.0, float(_ICON_GRID)
+    radius = side * _ICON_RADIUS
+    painter.drawRoundedRect(origin, origin, side, side, radius, radius)
 
-    painter.setPen(QColor("#ffffff"))
-    # W is a wider glyph than most, so it gets a smaller point size to keep the
-    # same optical margin inside the rounded square.
-    # Named per platform: asking Qt for a family that is not installed costs a
-    # font-alias scan and a console warning on every start.
-    font = QFont("Helvetica Neue" if IS_MACOS else "Segoe UI", 26, QFont.Bold)
-    painter.setFont(font)
-    painter.drawText(0, 0, 64, 64, Qt.AlignCenter, _TRAY_LETTER)
+    # Black rather than ExtraBold: measured on the 256 px app icon it gives a
+    # 36 px stroke against win-voice-over's 37 px (macOS "heavy"); ExtraBold
+    # gave 35.
+    letter = _glyphs(_ICON_LETTER, side * _ICON_LETTER_SIZE, QFont.Black)
+    suffix = _glyphs(_ICON_SUFFIX, side * _ICON_SUFFIX_SIZE, QFont.Bold)
+    # Placed by the ink of the glyphs, not their advance boxes, so the pair is
+    # optically centred whatever the font's side bearings are.
+    placed_letter, placed_suffix = _tuck(letter, suffix, origin, side)
+
+    painter.setBrush(QColor("#ffffff"))
+    painter.drawPath(placed_letter)
+    painter.drawPath(placed_suffix)
     painter.end()
 
     return pixmap
+
+
+def _tuck(
+    letter: QPainterPath, suffix: QPainterPath, origin: float, side: float
+) -> tuple[QPainterPath, QPainterPath]:
+    """Place the W and the suffix as a centred pair, the suffix as far under
+    the W's right arm as it goes without touching it."""
+    letter_ink, suffix_ink = letter.boundingRect(), suffix.boundingRect()
+    margin = QPainterPathStroker()
+    margin.setWidth(_ICON_GAP * 2)
+    margin.setJoinStyle(Qt.RoundJoin)
+    steps = 16
+    for step in range(steps, -1, -1):
+        overlap = letter_ink.width() * _ICON_MAX_OVERLAP * step / steps
+        width = letter_ink.width() + suffix_ink.width() - overlap
+        letter_left = origin + (side - width) / 2
+        letter_top = origin + (side - letter_ink.height()) / 2 - side * _ICON_RAISE
+        placed_letter = letter.translated(
+            letter_left - letter_ink.left(), letter_top - letter_ink.top()
+        )
+        placed_suffix = suffix.translated(
+            letter_left + letter_ink.width() - overlap - suffix_ink.left(),
+            letter_top + letter_ink.height() + side * _ICON_RAISE - suffix_ink.bottom(),
+        )
+        padded = margin.createStroke(placed_suffix).united(placed_suffix)
+        if not placed_letter.intersects(padded):
+            break
+    return placed_letter, placed_suffix
+
+
+def _glyphs(text: str, pixel_size: float, weight: QFont.Weight) -> QPainterPath:
+    """``text`` as an outline, in the system UI font.
+
+    A pixel size, not a point size: points go through the device's DPI, which
+    is 72 for a QPixmap on macOS and 96 on Windows, so the same point size drew
+    a different-sized letter on each. The system font because it is always
+    installed -- asking for a missing family costs a font-alias scan and a
+    warning -- and on macOS it is the one with a heavy enough W.
+    """
+    font = QFontDatabase.systemFont(QFontDatabase.GeneralFont)
+    font.setPixelSize(round(pixel_size))
+    font.setWeight(weight)
+    path = QPainterPath()
+    path.addText(0, 0, font, text)
+    return path
 
 
 def _claim_single_instance() -> bool:
