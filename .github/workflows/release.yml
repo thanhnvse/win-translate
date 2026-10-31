@@ -66,7 +66,15 @@ jobs:
           -r requirements-build.txt -c packaging/constraints.txt
 
       - name: Run the tests
-        run: python -m pytest tests -q
+        shell: bash
+        # Failing tests are also written as annotations: GitHub shows those on
+        # the run page without signing in, whereas the log needs a sign-in.
+        run: |
+          set -o pipefail
+          python -m pytest tests -q -rfE 2>&1 | tee pytest.log || {
+            grep -E '^(FAILED|ERROR) ' pytest.log | sed 's/^/::error title=pytest::/'
+            exit 1
+          }
 
       - name: Make sure Inno Setup is installed
         if: runner.os == 'Windows'
