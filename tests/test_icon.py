@@ -8,6 +8,9 @@ platform supplies.
 
 import pytest
 
+#: A box is a closed rectangle: five path elements. A real W has many more.
+_BOX_ELEMENTS = 5
+
 
 @pytest.fixture
 def placed(qapp):
@@ -18,6 +21,12 @@ def placed(qapp):
     side = float(app._ICON_GRID)
     letter = app._glyphs(app._ICON_LETTER, side * app._ICON_LETTER_SIZE, QFont.Black)
     suffix = app._glyphs(app._ICON_SUFFIX, side * app._ICON_SUFFIX_SIZE, QFont.Bold)
+    if letter.elementCount() <= _BOX_ELEMENTS:
+        # Qt's offscreen platform on Windows loads no fonts and draws every
+        # glyph as a box, and boxes cannot be tucked: the W's box and the
+        # suffix's always touch. The real app runs on the windows platform,
+        # with Segoe UI; the layout itself is checked where fonts exist.
+        pytest.skip("this Qt platform has no fonts; glyphs are drawn as boxes")
     return app._tuck(letter, suffix, 0.0, side)
 
 

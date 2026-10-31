@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +48,8 @@ DEFAULT_ISCC = Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")
 #: Long enough for a slow CI machine. A windowed .exe that crashes shows a modal
 #: traceback dialog instead of exiting, which would otherwise hang the build.
 SELF_CHECK_TIMEOUT_SECONDS = 180
+#: hdiutil create, tried this many times before the build gives up.
+HDIUTIL_ATTEMPTS = 3
 #: The sizes a Windows .ico carries; Explorer picks the nearest.
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
@@ -168,10 +171,21 @@ def make_dmg(app: Path) -> Path:
         # ditto keeps the bundle's symlinks and code signature intact.
         run("ditto", str(app), str(staging / app.name))
         (staging / "Applications").symlink_to("/Applications")
-        run(
+        command = (
             "hdiutil", "create", "-volname", APP_NAME, "-srcfolder", str(staging),
             "-ov", "-format", "UDZO", str(out),
         )  # fmt: skip
+        # On GitHub's macOS runners hdiutil now and then fails with "Resource
+        # busy"; one such failure would hold back the whole release.
+        for attempt in range(1, HDIUTIL_ATTEMPTS + 1):
+            try:
+                run(*command)
+                break
+            except PackageError:
+                if attempt == HDIUTIL_ATTEMPTS:
+                    raise
+                print(f"hdiutil failed, retrying ({attempt}/{HDIUTIL_ATTEMPTS})", flush=True)
+                time.sleep(5 * attempt)
     return out
 
 
