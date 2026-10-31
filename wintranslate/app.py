@@ -23,6 +23,7 @@ import sys
 import threading
 from itertools import count
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -458,20 +459,27 @@ def _explain_accessibility() -> None:
 
 
 def _configure_logging() -> None:
-    """stderr everywhere, plus a file on Windows.
+    """stderr everywhere, plus a file where stderr goes nowhere.
 
-    macOS keeps stderr: start.command appends it to
-    ~/Library/Logs/win-translate.log. Windows has nowhere for it to go --
-    start.cmd runs pythonw.exe, which has no console and no redirection -- so
-    anything logged there would be lost, which is the whole reason a log exists.
+    Run from source on macOS, stderr is kept: start.command and the developer
+    launcher append it to ~/Library/Logs/win-translate.log. Windows has nowhere
+    for it to go -- start.cmd runs pythonw.exe, which has no console and no
+    redirection -- and neither has the packaged app on either OS, which
+    LaunchServices or Explorer starts with stderr pointed at nothing. There,
+    anything logged would be lost, which is the whole reason a log exists.
     """
     logging.basicConfig(level=logging.WARNING, format=_LOG_FORMAT)
     # One line per translation from our own code; libraries stay at WARNING.
     logging.getLogger("wintranslate").setLevel(logging.INFO)
-    if IS_MACOS:
+    frozen = getattr(sys, "frozen", False)
+    if IS_MACOS and not frozen:
         return
 
-    path = config_path().parent / f"{APP_NAME}.log"
+    if IS_MACOS:
+        # Where Console.app looks, and where the source-run log already is.
+        path = Path.home() / "Library" / "Logs" / f"{APP_NAME}.log"
+    else:
+        path = config_path().parent / f"{APP_NAME}.log"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(

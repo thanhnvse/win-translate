@@ -3,9 +3,12 @@
 # pick up a library version released yesterday (PyObjC 13.0 came out on
 # 2026-10-30). Raise these on purpose, rebuild, and run the self-check.
 #
-# PySide6 also sets the oldest macOS the app runs on: the 6.11 wheels are built
-# for macOS 13, 6.12 for macOS 14. Keep LSMinimumSystemVersion in
-# win-translate.spec in step.
+# PySide6 also sets the oldest macOS the app runs on. 6.11.2 is tagged
+# macosx_13_0 and its Qt frameworks are built for 13. Its binding libraries
+# (QtCore.abi3.so, libshiboken6) carry minos 15.0, but dyld does not refuse a
+# library for that, and every system symbol they import exists on 13, so
+# LSMinimumSystemVersion stays 13.0 -- not yet confirmed on a real 13 or 14.
+# 6.12 is tagged macOS 14; keep win-translate.spec in step when raising it.
 PySide6==6.11.2
 PySide6-Essentials==6.11.2
 PySide6-Addons==6.11.2

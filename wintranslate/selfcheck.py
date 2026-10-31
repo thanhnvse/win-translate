@@ -35,6 +35,7 @@ def run(report: Path) -> int:
     check("icon", _icon)
     check("flag svg", _flag)
     check("theme assets", _theme_assets)
+    check("svg image plugin", _svg_image_plugin)
     check("popup", _popup)
     check("settings window", _settings)
     check("https ca bundle", _ca_bundle)
@@ -93,6 +94,22 @@ def _theme_assets() -> str:
     if missing:
         raise FileNotFoundError(", ".join(missing))
     return str(theme.ASSETS)
+
+
+def _svg_image_plugin() -> str:
+    # The stylesheet's chevrons load through Qt's image plugins, unlike the
+    # flags, which QSvgRenderer draws directly; a build missing the plugin
+    # passes the flag check and still shows no arrows.
+    from PySide6.QtGui import QImageReader, QPixmap
+
+    from wintranslate import theme
+
+    if b"svg" not in [bytes(f) for f in QImageReader.supportedImageFormats()]:
+        raise RuntimeError("Qt has no svg image format plugin")
+    chevron = theme.ASSETS / "chevron-down-dim.svg"
+    if QPixmap(str(chevron)).isNull():
+        raise RuntimeError(f"QPixmap could not load {chevron.name}")
+    return "svg"
 
 
 def _popup() -> str:

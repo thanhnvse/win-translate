@@ -6,15 +6,21 @@ name: Release
 #
 # * A pushed tag v<version> publishes them as a GitHub Release. The tag must
 #   match wintranslate.__version__.
-# * A push to main that touches the packaging builds them as workflow
-#   artifacts only, so a broken package shows up before anyone tags it.
+# * A push to main that touches the app or its packaging builds them as
+#   workflow artifacts only, so a broken package shows up before anyone tags
+#   it.
 # * "Run workflow" on the Actions tab does the same by hand.
 
 on:
   push:
     tags: ["v*"]
     branches: [main]
+    # The app's code, assets and tests too: a change there can break the
+    # Windows tests or the frozen app as surely as a packaging change can.
     paths:
+      - "wintranslate/**"
+      - "assets/**"
+      - "tests/**"
       - "packaging/**"
       - "scripts/package.py"
       - "scripts/build_macos_app.py"

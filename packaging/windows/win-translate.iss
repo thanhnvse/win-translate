@@ -28,6 +28,8 @@ DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+; Qt 6 needs Windows 10 1809 or later.
+MinVersion=10.0.17763
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; The app holds this mutex while it runs (wintranslate/app.py), so setup and
@@ -50,9 +52,17 @@ Name: "startup"; Description: "&Start {#AppName} when Windows starts"; GroupDesc
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
-Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: startup
+; The same AppUserModelID the app sets at startup (wintranslate/app.py), so a
+; pinned shortcut and the running app share one taskbar button.
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppName}.tray"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppName}.tray"; Tasks: desktopicon
+Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppName}.tray"; Tasks: startup
+
+[InstallDelete]
+; Setup only creates the shortcuts of ticked tasks; re-running it with one
+; unticked must also take away the shortcut an earlier install made.
+Type: files; Name: "{autodesktop}\{#AppName}.lnk"; Tasks: not desktopicon
+Type: files; Name: "{userstartup}\{#AppName}.lnk"; Tasks: not startup
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent

@@ -17,6 +17,19 @@ REPO="thanhnvse/win-translate"
 APPS="${WIN_TRANSLATE_APPS:-/Applications}"
 APP="$APPS/win-translate.app"
 
+if [ "$(id -u)" = 0 ]; then
+    # Run as root, the app would be owned by root and started as root.
+    echo "Run this without sudo." >&2
+    exit 1
+fi
+mkdir -p "$APPS" 2>/dev/null || true
+if [ ! -w "$APPS" ]; then
+    echo "Cannot write to $APPS (only administrators can). Install into your own" >&2
+    echo "Applications folder instead by adding WIN_TRANSLATE_APPS=\$HOME/Applications" >&2
+    echo "before sh, or run this from an administrator account." >&2
+    exit 1
+fi
+
 case "$(uname -m)" in
     arm64) arch=arm64 ;;
     x86_64) arch=x86_64 ;;
@@ -37,7 +50,7 @@ work=$(mktemp -d)
 mount=""
 cleanup() {
     if [ -n "$mount" ]; then hdiutil detach -quiet "$mount" || true; fi
-    rm -rf "$work"
+    rm -rf "$work" "$APP.new"
 }
 trap cleanup EXIT
 
@@ -62,10 +75,13 @@ if [ -n "$running" ]; then
     sleep 2
 fi
 
-mkdir -p "$APPS"
+# Copy beside the old app first, then swap: an interrupted copy leaves the old
+# app working instead of no app or half of one. ditto, not cp, keeps the
+# bundle's symlinks and its code signature intact.
+rm -rf "$APP.new"
+ditto "$mount/win-translate.app" "$APP.new"
 rm -rf "$APP"
-# ditto, not cp: it keeps the bundle's symlinks and its code signature intact.
-ditto "$mount/win-translate.app" "$APP"
+mv "$APP.new" "$APP"
 echo "Installed $APP"
 if [ "${WIN_TRANSLATE_OPEN:-1}" != 0 ]; then
     open "$APP"
