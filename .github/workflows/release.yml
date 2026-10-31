@@ -1,0 +1,116 @@
+name: Release
+
+# Builds the self-contained downloads -- a .dmg per Mac architecture and a
+# Windows installer -- with scripts/package.py, which refuses to package a
+# frozen app that fails its own --self-check.
+#
+# * A pushed tag v<version> publishes them as a GitHub Release. The tag must
+#   match wintranslate.__version__.
+# * A push to main that touches the packaging builds them as workflow
+#   artifacts only, so a broken package shows up before anyone tags it.
+# * "Run workflow" on the Actions tab does the same by hand.
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - "packaging/**"
+      - "scripts/package.py"
+      - "scripts/build_macos_app.py"
+      - "requirements*.txt"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Explicit labels rather than *-latest, so an image change is a
+          # deliberate edit here.
+          - name: macOS Apple silicon
+            os: macos-15
+          - name: macOS Intel
+            os: macos-15-intel
+          - name: Windows
+            os: windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Check that the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(python -c "import wintranslate; print(wintranslate.__version__)")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match wintranslate.__version__ ($version)."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        # The constraints pin the versions the package was last checked with.
+        run: >
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          -r requirements-build.txt -c packaging/constraints.txt
+
+      - name: Run the tests
+        run: python -m pytest tests -q
+
+      - name: Make sure Inno Setup is installed
+        if: runner.os == 'Windows'
+        shell: pwsh
+        # Preinstalled on GitHub's Windows images; this only guards against an
+        # image that drops it.
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Package
+        timeout-minutes: 20
+        run: python scripts/package.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: win-translate-${{ matrix.os }}
+          path: dist.nosync/*
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --title "win-translate $GITHUB_REF_NAME"
+          --generate-notes
+          --verify-tag

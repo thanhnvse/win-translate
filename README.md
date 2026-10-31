@@ -4,6 +4,85 @@ A background tray app for Windows and macOS. Select text in any application,
 press a hotkey, and a small popup shows the translation next to the cursor:
 English in, Vietnamese out — and Vietnamese in, English out.
 
+## Download and install
+
+Ready-made downloads are on the
+[Releases page](https://github.com/thanhnvse/win-translate/releases/latest).
+They carry everything the app needs; nothing else has to be installed first —
+no Python, no git.
+
+### macOS
+
+macOS 13 or later. The fastest way is one line in Terminal, which downloads
+the latest release, puts it in Applications and starts it — and, because it
+does not go through a browser, macOS does not ask for "Open Anyway":
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thanhnvse/win-translate/main/scripts/install-macos.sh | sh
+```
+
+Run the same line again to update. To install by hand instead:
+
+1. Download `win-translate-<version>-macos-arm64.dmg` for Apple silicon, or
+   `…-macos-x86_64.dmg` for an Intel Mac (Apple menu → About This Mac shows
+   which).
+2. Open it and drag **win-translate** onto **Applications**, eject the disk
+   image, and start the app from Applications.
+3. The first time, macOS says it could not verify the app, because it is not
+   notarized (kiểm duyệt) by Apple. On macOS 15 and later choose **Done** —
+   not Move to Trash — then, within about an hour, open System Settings →
+   Privacy & Security, scroll to **Security**, click **Open Anyway**, enter
+   your password, and choose **Open** when the question comes back. On macOS
+   13 and 14, Control-click the app and choose **Open** instead. Either way
+   it is needed once.
+4. If macOS offers no Open Anyway — Apple documents the button for apps in
+   general, and this one is signed only ad hoc — clear the download mark once
+   in Terminal, then start the app again (or use the one-line install above,
+   which avoids the mark altogether):
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/win-translate.app
+   ```
+
+On its first start win-translate asks for **Accessibility** permission, which
+it needs to copy the selection (see "Accessibility permission" below). Then a
+blue **W** appears in the menu bar: select text anywhere and press
+**Control+T**.
+
+After an update macOS may refuse the old permission without saying so — the
+switch stays on but the popup reports it missing. Remove win-translate from
+the Accessibility list with **−**, add it again with **+**, and restart it.
+The downloads are signed ad hoc, so each new version looks like a different
+app to macOS.
+
+To uninstall, quit it from the menu bar W and drag it from Applications to the
+Trash.
+
+### Windows
+
+Windows 10 or 11, 64-bit. Download
+`win-translate-<version>-windows-x64-setup.exe` and run it. It installs for
+your user only, so it needs no administrator rights; it offers a desktop
+shortcut and starting with Windows, and starts the app when it finishes. A
+**W** appears in the notification area — possibly hidden under the **^**
+arrow: select text and press **Ctrl+Alt+T**.
+
+The installer is not signed with a paid certificate, so Windows warns before
+running it:
+
+* Edge may say the file "isn't commonly downloaded": choose **…** → **Keep**
+  → **Show more** → **Keep anyway**.
+* SmartScreen shows "Windows protected your PC": choose **More info** →
+  **Run anyway**. It asks again for each new version.
+* On a Windows 11 PC with **Smart App Control** on, unsigned programs are
+  blocked with no Run anyway. The choices are to turn Smart App Control off
+  (Windows Security → App & browser control) or to build from source, below.
+
+To update, run the new installer; if win-translate is running, it asks you to
+close it first.
+
+To uninstall: Settings → Apps → win-translate → Uninstall.
+
 ## Why a hotkey and not a right-click menu
 
 The original idea was a "Translate to Vietnamese" entry in the right-click menu
@@ -27,9 +106,9 @@ On macOS the original idea *is* achievable, through the Services menu
 here uses the same hotkey as Windows instead, so it runs straight from the
 source tree like the Windows one does.
 
-## Install
+## Build from source
 
-Requires Python 3.10+.
+For working on the code. Requires Python 3.10+.
 
 Windows:
 
@@ -330,6 +409,46 @@ the quickest way to see what the other platform looks like:
 It writes `.pytest_cache/ui-<platform>/` and prints the system font, the
 popup's size before and after a translation, and any language still missing a
 flag.
+
+## Releasing
+
+1. Raise `__version__` in `wintranslate/__init__.py` and commit it to `main`.
+   Any change to the workflow file has to be on `main` before the tag:
+   GitHub refuses to create the release from a tagged commit whose workflow
+   differs from the default branch's.
+2. Tag that commit and push the tag:
+
+   ```bash
+   git tag v0.2.0
+   ```
+
+   ```bash
+   git push origin v0.2.0
+   ```
+
+The [Release workflow](.github/workflows/release.yml) then runs the tests and
+`scripts/package.py` on macOS (Apple silicon and Intel) and Windows, and
+publishes the `.dmg` files, the Windows installer and `SHA256SUMS.txt` as a
+GitHub Release. It refuses a tag that does not match `__version__`. A push to
+`main` that touches the packaging runs the same builds without publishing, and
+so does **Run workflow** on the Actions tab; the files are then attached to the
+workflow run.
+
+To package locally — the output goes to `dist.nosync/`:
+
+```bash
+python -m pip install -r requirements.txt -r requirements-build.txt -c packaging/constraints.txt
+```
+
+```bash
+python scripts/package.py
+```
+
+PyInstaller freezes the app from `packaging/win-translate.spec`; the script
+then runs the frozen app with `--self-check`, which touches each piece a frozen
+build can lose without anyone noticing (wintranslate/selfcheck.py), and stops
+if one is missing. `packaging/constraints.txt` pins the library versions the
+package was last checked with; raise them on purpose, not by accident.
 
 ## Assets
 

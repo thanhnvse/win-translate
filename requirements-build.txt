@@ -1,0 +1,3 @@
+pyinstaller>=6.22
+# The Windows .ico is assembled with Pillow.
+pillow>=10; sys_platform == "win32"

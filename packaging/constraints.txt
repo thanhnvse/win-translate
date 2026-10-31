@@ -1,0 +1,20 @@
+# The exact versions the packaged app was last built and self-checked with.
+# Packaging installs with "-c packaging/constraints.txt" so a release does not
+# pick up a library version released yesterday (PyObjC 13.0 came out on
+# 2026-10-30). Raise these on purpose, rebuild, and run the self-check.
+#
+# PySide6 also sets the oldest macOS the app runs on: the 6.11 wheels are built
+# for macOS 13, 6.12 for macOS 14. Keep LSMinimumSystemVersion in
+# win-translate.spec in step.
+PySide6==6.11.2
+PySide6-Essentials==6.11.2
+PySide6-Addons==6.11.2
+shiboken6==6.11.2
+pyobjc-core==12.2.2
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-Quartz==12.2.2
+pyobjc-framework-CoreText==12.2.2
+pyobjc-framework-ApplicationServices==12.2.2
+requests==2.34.2
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
