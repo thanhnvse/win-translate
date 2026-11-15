@@ -144,6 +144,8 @@ A tray icon appears; the app does nothing else until the hotkey fires.
 
 Default hotkey is **Ctrl+Alt+T**. Select text anywhere, press it, and the popup
 appears by the pointer. `Esc`, the `✕`, or clicking elsewhere dismisses it.
+The speaker beside the original and the one beside the translation read that
+text aloud; see "Reading aloud".
 
 The direction is chosen from the text: select English (or anything else) and you
 get Vietnamese; select Vietnamese and you get English. One hotkey, both ways.
@@ -348,6 +350,46 @@ rather than rendering it. Regenerate it from
   asks for Vietnamese first and re-translates only when the reply says the input
   was already Vietnamese, so only the reverse direction pays twice.
 
+## Reading aloud
+
+The speaker icon beside the original reads the whole selection, not just the
+one-line preview; the one beside the translation reads the translation. Click
+again to stop. Closing the popup, or a new translation, stops it too.
+
+The voices are the system's own, so nothing is sent anywhere: AVSpeechSynthesizer
+on macOS, the Windows speech voices on Windows. A language is read only by a
+voice for that language. When there is none, its button is greyed out and its
+tooltip says where to add one:
+
+* **macOS:** System Settings > Accessibility > Spoken Content > System voice >
+  Manage Voices. The Mac this was written on had voices for 39 of the 109
+  languages, Vietnamese (Linh) among them.
+* **Windows:** Settings > Time & language > Speech > Manage voices. Vietnamese
+  ("An") is not installed by default.
+
+Restart win-translate after adding a voice. A code that names a region is
+strict: Traditional Chinese (`zh-TW`) is never read by a mainland voice. A code
+without one takes any voice of that language, and on macOS that is not always
+the obvious one: French is read by Amélie (Canada) and Dutch by Ellen (Belgium)
+even when voices from France and the Netherlands are installed, because Qt asks
+macOS for plain "fr" and "nl". The tooltip names the voice that will read.
+
+On Windows the app tries the OneCore voices (`winrt`) first and falls back to
+the older desktop voices (`sapi`) when winrt finds none.
+
+To hear it without the hotkey, from the packaged app:
+
+```bash
+"/Applications/win-translate.app/Contents/MacOS/win-translate" --speak-test ~/speak.txt vi
+```
+
+On Windows: `win-translate.exe --speak-test speak.txt vi`. The report names the
+engine and any engine passed over, the voice, the locale asked for and the one
+landed on, when speech started and finished, and the engine's last error. Qt's
+engines record their errors without reporting them, so this is the place to
+look when nothing is heard. Set the environment variable
+`WIN_TRANSLATE_TTS_ENGINE` to `sapi`, for example, to force another engine.
+
 ## Known limitations
 
 * **Technical vocabulary.** Google Translate is weak on it. "Race condition"
@@ -366,6 +408,12 @@ rather than rendering it. Regenerate it from
   keys on an ANSI layout, so on AZERTY `ctrl+alt+a` is the key labelled Q.
 * **Apps that do not support Ctrl+C** (some custom controls, PDF viewers in
   protected mode) return nothing, and the popup says so.
+* **Reading aloud on Windows** has not been heard on a real machine yet. The
+  build leaves out FFmpeg, which the `winrt` engine should not need; if the
+  speak test above stays silent, that is the first thing to suspect. winrt
+  plays to the output that was the default when it started, so the app starts
+  it again when the default output changes (headphones in or out); that path,
+  too, has only been tested against a stand-in for the engine.
 
 ## Tests
 
@@ -447,7 +495,12 @@ python scripts/package.py
 PyInstaller freezes the app from `packaging/win-translate.spec`; the script
 then runs the frozen app with `--self-check`, which touches each piece a frozen
 build can lose without anyone noticing (wintranslate/selfcheck.py), and stops
-if one is missing. `packaging/constraints.txt` pins the library versions the
+if one is missing. That includes a real text-to-speech engine plugin (one
+that finds no voice on the build machine is reported, not failed), and the absence
+of FFmpeg and Qt's mock speech engine, which QtTextToSpeech's dependencies
+bring in and the spec removes: on macOS they would add 17 MB for nothing. With
+them removed, reading aloud added 2.0 MB to the app and 0.8-1.4 MB to the DMG
+(two builds; DMG compression varies). `packaging/constraints.txt` pins the library versions the
 package was last checked with; raise them on purpose, not by accident.
 
 ## Assets

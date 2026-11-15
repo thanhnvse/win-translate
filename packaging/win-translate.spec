@@ -20,15 +20,44 @@ APP_NAME = "win-translate"
 BUNDLE_ID = "io.github.thanhnvse.win-translate"
 ICON = os.environ.get("WIN_TRANSLATE_ICON")
 
+# Unused standard-library weight.
+EXCLUDES = ["tkinter", "unittest", "pydoc", "test"]
+if sys.platform == "darwin":
+    # QtTextToSpeech depends on QtMultimedia, whose hook brings in FFmpeg:
+    # +21.9 MB on a minimal build, 17.3 MB of it FFmpeg. The darwin engine
+    # speaks through AVSpeechSynthesizer, so the Python module goes; reading
+    # aloud then added 2.0 MB to this app and 0.8-1.4 MB to the DMG, and the
+    # frozen app still read Vietnamese with Linh (--speak-test).
+    # The Qt framework itself stays; QtTextToSpeech links it.
+    # Not on Windows: the winrt engine plays through Qt Multimedia's
+    # QAudioSink, so there only FFmpeg is dropped, below.
+    EXCLUDES += ["PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"]
+
+#: Bundled by the hooks, used by nothing here. FFmpeg is Qt Multimedia's
+#: backend for media files; Qt documents the Windows Media Foundation plugin,
+#: which stays, as the alternative backend. That winrt still speaks with
+#: FFmpeg gone has not been checked on a real Windows machine; run
+#: `win-translate.exe --speak-test report.txt vi` there. The mock engine is
+#: Qt's fake test voice, which Qt says not to deploy. --self-check fails if
+#: any of these come back.
+UNUSED_BINARIES = (
+    "avcodec", "avformat", "avutil", "swresample", "swscale",
+    "ffmpegmediaplugin", "qtexttospeech_mock",
+)  # fmt: skip
+
 a = Analysis(  # noqa: F821
     [str(ROOT / "packaging" / "entry.py")],
     pathex=[str(ROOT)],
     # flags.py and theme.py look for <package>/../assets; in the frozen app the
     # package's parent is the bundle's root, so the folder goes there.
     datas=[(str(ROOT / "assets"), "assets")],
-    # Unused standard-library weight.
-    excludes=["tkinter", "unittest", "pydoc", "test"],
+    excludes=EXCLUDES,
 )
+a.binaries = [
+    entry
+    for entry in a.binaries
+    if not any(name in Path(entry[0]).name.lower() for name in UNUSED_BINARIES)
+]
 pyz = PYZ(a.pure)  # noqa: F821
 
 exe = EXE(  # noqa: F821

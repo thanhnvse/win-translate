@@ -4,6 +4,10 @@ import sys
 # Must be set before PySide6 creates a QApplication, so the GUI tests run
 # without a display.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Qt's test engine: it reads nothing aloud and works under offscreen, where
+# the macOS engine never starts speaking. Its five locales (en_GB, en_US,
+# fi_FI, nb_NO, nn_NO) include no Vietnamese.
+os.environ.setdefault("WIN_TRANSLATE_TTS_ENGINE", "mock")
 if sys.platform == "win32":
     # The offscreen platform on Windows reads fonts only from this folder, and
     # the PySide6 wheel ships none, so every glyph came out as a box and the

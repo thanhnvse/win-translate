@@ -69,6 +69,11 @@ _ERROR_ALREADY_EXISTS = 183
 #: Long enough for Qt's own launch-time activation to have landed first.
 _YIELD_AFTER_LAUNCH_MS = 500
 
+#: When to start the speech engine. Starting it took ~150 ms on the GUI thread
+#: on macOS; done at the first translation, that delay landed on the popup.
+#: A few seconds after launch the app is idle in the tray.
+_PREPARE_SPEECH_AFTER_MS = 3000
+
 #: Drawn on the icon: a big W with a small "tr" tucked under its right arm,
 #: the layout win-voice-over uses for its "vo". Sizes are fractions of the
 #: square's side; the overlap is a fraction of the W's own width.
@@ -146,8 +151,10 @@ class TranslateApp:
             # keyboard focus on an app with no window. Give it back once that
             # has happened.
             QTimer.singleShot(_YIELD_AFTER_LAUNCH_MS, macos.yield_activation)
+        QTimer.singleShot(_PREPARE_SPEECH_AFTER_MS, self._popup.prepare_speech)
 
     def shutdown(self) -> None:
+        self._popup.stop_speech()
         self._hotkey.stop()
         if not IS_MACOS:
             selection.stop_focus_watch()

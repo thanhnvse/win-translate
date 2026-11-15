@@ -325,6 +325,11 @@ def popup_stylesheet(theme: Theme) -> str:
 #translation[state="error"] {{ color: {theme.error}; font-weight: 600; }}
 #translation[state="pending"] {{ color: {theme.dim}; font-weight: 400; font-style: italic; }}
 #source {{ color: {theme.dim}; font-size: 11px; }}
+/* The speaker buttons are bare icons until hovered, so they do not compete
+   with Close and Copy. The icon carries the colour; see popup._speaker_icon. */
+#speak {{ background: transparent; border: none; border-radius: 6px; padding: 0; }}
+#speak:hover {{ background: {theme.secondary_bg}; }}
+#speak:disabled {{ background: transparent; }}
 {_controls(theme)}
 /* The scroll area's viewport is a separate widget with its own palette and
    defaults to QPalette.Base, so without this the translation is drawn on a

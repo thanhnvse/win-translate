@@ -351,3 +351,380 @@ class TestWindowShadow:
 
         popup.apply_appearance(WIDTH, MAX_HEIGHT, "neon")
         assert popup.windowFlags() & Qt.NoDropShadowWindowHint
+
+
+class FakeSpeaker:
+    """Stands in for speech.Speaker so a test decides when the engine reports
+    starting and stopping -- the order macOS uses is the one that matters."""
+
+    def __init__(self, voices=("en", "fi", "vi")):
+        from PySide6.QtCore import QObject, Signal
+
+        class _Signals(QObject):
+            speaking = Signal()
+            stopped = Signal()
+
+        self._signals = _Signals()
+        self.speaking = self._signals.speaking
+        self.stopped = self._signals.stopped
+        self.voices = set(voices)
+        self.said: list[tuple[str, str]] = []
+        self.stops = 0
+        #: What the engine's own state() would say, for the watchdog.
+        self.speaking_now = False
+
+    def is_available(self):
+        return True
+
+    def voice_for(self, code):
+        from PySide6.QtCore import QLocale
+
+        from wintranslate.speech import Voice
+
+        if code not in self.voices:
+            return None
+        return Voice(QLocale(code), QLocale(code), f"Voice-{code}")
+
+    def last_error(self):
+        return ""
+
+    def is_speaking(self):
+        return self.speaking_now
+
+    def say(self, text, code):
+        if code not in self.voices:
+            return False
+        self.said.append((text, code))
+        return True
+
+    def stop(self):
+        self.stops += 1
+
+
+@pytest.fixture
+def fake_speaker():
+    return FakeSpeaker()
+
+
+@pytest.fixture
+def speaking_popup(qapp, fake_speaker):
+    from wintranslate.popup import TranslationPopup
+
+    return TranslationPopup(width=WIDTH, max_height=MAX_HEIGHT, speaker=fake_speaker)
+
+
+def buttons(popup):
+    from wintranslate.popup import SOURCE, TRANSLATION
+
+    return popup._speak_buttons[SOURCE], popup._speak_buttons[TRANSLATION]
+
+
+class TestSpeakButtonStates:
+    """With the real mock engine, as conftest sets it: no Vietnamese voice."""
+
+    def test_both_are_disabled_while_translating(self, popup):
+        popup.show_pending("Hello")
+        source, translation = buttons(popup)
+        assert source.isVisible() and translation.isVisible()
+        assert not source.isEnabled() and not translation.isEnabled()
+
+    def test_both_are_enabled_when_both_languages_have_a_voice(self, popup):
+        popup.show_result("Hello", "Hei", "en", target="fi")
+        source, translation = buttons(popup)
+        assert source.isEnabled() and translation.isEnabled()
+        assert "English" in source.toolTip()
+        assert "Finnish" in translation.toolTip()
+
+    def test_a_language_with_no_voice_gets_a_disabled_button_that_says_why(self, popup):
+        popup.show_result("Xin chào", "Hello", "vi", target="en")
+        source, translation = buttons(popup)
+        assert not source.isEnabled()
+        assert "No Vietnamese voice is installed" in source.toolTip()
+        assert translation.isEnabled()
+
+    def test_another_territory_of_the_same_language_does_not_count(self, popup):
+        # The mock engine has en_GB and en_US; en-AU names a region, so it is
+        # binding, and neither of those may stand in for it.
+        popup.show_result("G'day", "Hei", "en-AU", target="fi")
+        source, translation = buttons(popup)
+        assert not source.isEnabled()
+        assert translation.isEnabled()
+
+    def test_an_undetected_source_language_disables_its_button(self, popup):
+        popup.show_result("Hello", "Hei", None, target="fi")
+        source, translation = buttons(popup)
+        assert not source.isEnabled()
+        assert "not detected" in source.toolTip()
+        assert translation.isEnabled()
+
+    def test_an_error_hides_both(self, popup):
+        popup.show_result("Hello", "Hei", "en", target="fi")
+        popup.show_error("Google Translate returned HTTP 429.")
+        source, translation = buttons(popup)
+        assert not source.isVisible() and not translation.isVisible()
+
+    def test_the_buttons_never_take_keyboard_focus(self, popup):
+        from PySide6.QtCore import Qt
+
+        for button in buttons(popup):
+            assert button.focusPolicy() == Qt.NoFocus
+
+    @pytest.mark.parametrize("width", [280, 460, 1200])
+    def test_the_buttons_fit_inside_the_card_at_every_allowed_width(self, popup, width):
+        from PySide6.QtCore import QRect
+
+        popup.apply_appearance(width, MAX_HEIGHT, "light")
+        popup.show_result("Hello " * 30, "Hei " * 40, "en", target="fi")
+        assert popup.width() == width
+        assert popup.rect().contains(popup._card.geometry()), "the card overflows"
+        card = popup._card.rect()
+
+        def box(widget):
+            return QRect(widget.mapTo(popup._card, widget.rect().topLeft()), widget.size())
+
+        source_button, translation_button = buttons(popup)
+        for text, button in ((popup._source, source_button), (popup._scroll, translation_button)):
+            assert card.contains(box(button)), width
+            assert box(text).right() < box(button).left(), "the text runs under the button"
+
+    def test_the_drawn_icons_are_not_blank(self, popup):
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
+
+        for icon in (popup._speak_icon, popup._stop_icon):
+            image = icon.pixmap(QSize(16, 16)).toImage()
+            assert any(
+                image.pixelColor(x, y).alpha() > 0 for x in range(16) for y in range(16)
+            )
+        disabled = popup._speak_icon.pixmap(QSize(16, 16), QIcon.Disabled).toImage()
+        normal = popup._speak_icon.pixmap(QSize(16, 16)).toImage()
+        assert disabled != normal, "a disabled button must look disabled"
+
+
+class TestReadingAloud:
+    def test_the_source_button_reads_the_whole_selection_not_the_preview(
+        self, speaking_popup, fake_speaker
+    ):
+        long_source = "word " * 200
+        speaking_popup.show_result(long_source, "Hei", "en", target="fi")
+        buttons(speaking_popup)[0].click()
+        assert fake_speaker.said == [(long_source, "en")]
+
+    def test_the_translation_button_reads_the_translation_in_the_target_language(
+        self, speaking_popup, fake_speaker
+    ):
+        speaking_popup.show_result("Hello", "Xin chào", "en", target="vi")
+        buttons(speaking_popup)[1].click()
+        assert fake_speaker.said == [("Xin chào", "vi")]
+
+    def test_a_second_click_stops(self, speaking_popup, fake_speaker):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        assert source.toolTip() == "Stop reading"
+        stops = fake_speaker.stops
+        source.click()
+        assert fake_speaker.stops == stops + 1
+        assert len(fake_speaker.said) == 1, "the second click must not read again"
+        assert source.toolTip().startswith("Read the original aloud")
+
+    def test_closing_the_popup_stops(self, speaking_popup, fake_speaker):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        buttons(speaking_popup)[1].click()
+        stops = fake_speaker.stops
+        speaking_popup.hide()
+        assert fake_speaker.stops > stops
+
+    def test_escape_stops(self, speaking_popup, fake_speaker, qapp):
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        buttons(speaking_popup)[1].click()
+        stops = fake_speaker.stops
+        qapp.sendEvent(
+            speaking_popup, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
+        )
+        assert fake_speaker.stops > stops
+
+    def test_a_new_translation_stops_the_old_one(self, speaking_popup, fake_speaker):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        stops = fake_speaker.stops
+        speaking_popup.show_pending("Another selection")
+        assert fake_speaker.stops > stops
+        assert source.toolTip() != "Stop reading"
+
+    def test_a_late_stop_report_does_not_undo_the_new_reading(
+        self, speaking_popup, fake_speaker
+    ):
+        """macOS order: after a switch, the old text's stop arrives after the
+        click, then the new text's start."""
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, translation = buttons(speaking_popup)
+        source.click()
+        fake_speaker.speaking.emit()
+        translation.click()
+        fake_speaker.stopped.emit()  # the source's stop, reported late
+        fake_speaker.speaking.emit()  # the translation's start
+        assert translation.toolTip() == "Stop reading"
+        assert source.toolTip() != "Stop reading"
+
+    def test_a_late_start_report_after_a_stop_changes_nothing(
+        self, speaking_popup, fake_speaker
+    ):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, translation = buttons(speaking_popup)
+        source.click()
+        source.click()  # stopped before the engine reported starting
+        fake_speaker.speaking.emit()
+        assert "Stop reading" not in (source.toolTip(), translation.toolTip())
+
+    def test_the_end_of_the_text_resets_the_button(self, speaking_popup, fake_speaker):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        fake_speaker.speaking.emit()
+        fake_speaker.stopped.emit()
+        assert source.toolTip().startswith("Read the original aloud")
+
+    def test_the_mock_engine_end_to_end(self, popup, qapp):
+        """Real engine signals, not the fake: the button shows Stop while the
+        mock engine speaks and goes back when it finishes."""
+        import time
+
+        popup.show_result("Hello", "Good morning to you all.", "fi", target="en")
+        _, translation = buttons(popup)
+        translation.click()
+        assert translation.toolTip() == "Stop reading"
+        deadline = time.monotonic() + 5
+        while translation.toolTip() == "Stop reading" and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert translation.toolTip().startswith("Read the translation aloud (English")
+
+
+class TestSpeechThatNeverStarts:
+    """Qt 6.11's engines drop their own errors, so a reading that fails may
+    never report starting. The button must not stay on Stop for good."""
+
+    def test_the_button_goes_back_to_idle(self, speaking_popup, fake_speaker, qapp):
+        import time
+
+        speaking_popup._speech_watchdog.setInterval(30)
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        assert source.toolTip() == "Stop reading"
+        deadline = time.monotonic() + 2
+        while source.toolTip() == "Stop reading" and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert source.toolTip().startswith("Read the original aloud")
+
+    def test_the_engine_is_left_alone_and_a_late_start_shows_stop_again(
+        self, speaking_popup, fake_speaker, qapp
+    ):
+        """winrt synthesises the whole text first; a long one may start after
+        the watchdog fired."""
+        import time
+
+        speaking_popup._speech_watchdog.setInterval(30)
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        stops = fake_speaker.stops
+        deadline = time.monotonic() + 2
+        while source.toolTip() == "Stop reading" and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert fake_speaker.stops == stops, "the watchdog must not stop the engine"
+        fake_speaker.speaking.emit()
+        assert source.toolTip() == "Stop reading"
+
+    def test_a_reading_that_starts_in_time_is_not_touched(
+        self, speaking_popup, fake_speaker, qapp
+    ):
+        import time
+
+        speaking_popup._speech_watchdog.setInterval(30)
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        fake_speaker.speaking.emit()
+        end = time.monotonic() + 0.15
+        while time.monotonic() < end:
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert source.toolTip() == "Stop reading"
+
+    def test_the_tooltip_names_the_voice_that_reads(self, speaking_popup):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, translation = buttons(speaking_popup)
+        assert source.toolTip() == "Read the original aloud (English, voice Voice-en)"
+        assert translation.toolTip() == "Read the translation aloud (Finnish, voice Voice-fi)"
+
+    def test_the_watchdog_keeps_stop_when_the_engine_is_in_fact_reading(
+        self, speaking_popup, fake_speaker, qapp
+    ):
+        """sapi: stopping one text and starting another in the same voice can
+        report nothing, while the engine's state says it is reading."""
+        import time
+
+        speaking_popup._speech_watchdog.setInterval(30)
+        speaking_popup.show_result("Xin chào", "Xin chào", "vi", target="vi")
+        source, translation = buttons(speaking_popup)
+        source.click()
+        fake_speaker.speaking.emit()
+        translation.click()  # no signal at all follows
+        fake_speaker.speaking_now = True
+        end = time.monotonic() + 0.2
+        while time.monotonic() < end:
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert translation.toolTip() == "Stop reading"
+
+
+class TestAfterAnError:
+    def test_the_buttons_come_back_after_a_failed_translation(self, speaking_popup):
+        speaking_popup.show_error("Google Translate returned HTTP 429.")
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, translation = buttons(speaking_popup)
+        assert source.isVisible() and translation.isVisible()
+        assert source.isEnabled() and translation.isEnabled()
+
+    def test_the_icon_switches_to_stop_and_back(self, speaking_popup):
+        speaking_popup.show_result("Hello", "Hei", "en", target="fi")
+        source, _ = buttons(speaking_popup)
+        source.click()
+        assert source.icon().cacheKey() == speaking_popup._stop_icon.cacheKey()
+        source.click()
+        assert source.icon().cacheKey() == speaking_popup._speak_icon.cacheKey()
+
+
+class TestStoppingTheRealEngine:
+    """The popup tests above count calls on a fake; these check that the
+    mock engine itself goes quiet."""
+
+    LONG = "one two three four five six seven eight nine ten eleven twelve"
+
+    def test_hiding_the_popup_stops_the_engine(self, popup):
+        from PySide6.QtTextToSpeech import QTextToSpeech
+
+        popup.show_result("Hello", self.LONG, "fi", target="en")
+        buttons(popup)[1].click()
+        engine = popup._speaker._engine
+        assert engine.state() == QTextToSpeech.State.Speaking
+        popup.hide()
+        assert engine.state() == QTextToSpeech.State.Ready
+
+    def test_a_new_translation_stops_the_engine(self, popup):
+        from PySide6.QtTextToSpeech import QTextToSpeech
+
+        popup.show_result("Hello", self.LONG, "fi", target="en")
+        buttons(popup)[1].click()
+        engine = popup._speaker._engine
+        assert engine.state() == QTextToSpeech.State.Speaking
+        popup.show_pending("Something else")
+        assert engine.state() == QTextToSpeech.State.Ready
